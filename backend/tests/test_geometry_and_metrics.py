@@ -487,3 +487,81 @@ def test_cascade_policy_c8286_verdicts() -> None:
     assert cp_broken["operational_verdict"] == "RECHAZADO_FISICA"
     assert cp_broken["recommended_tier"] == "REJECT_RECAPTURE_OR_SENSOR"
     assert cp_broken["colliding_pairs_count"] >= 1
+
+
+def test_local_3d_coordinate_transforms_and_chirality() -> None:
+    from app.services.local_metric_3d import opencv_to_gemini_points, opencv_to_threejs_points
+
+    pts_cv = np.array([[0.25, -0.10, 0.72], [-0.15, 0.30, 1.45]], dtype=np.float32)
+    pts_gem = opencv_to_gemini_points(pts_cv)
+    pts_three = opencv_to_threejs_points(pts_cv)
+
+    # OpenCV (X-right, Y-down, Z-fwd) -> Gemini (X-right, Y-fwd, Z-up)
+    assert np.allclose(pts_gem, [[0.25, 0.72, 0.10], [-0.15, 1.45, -0.30]], atol=1e-6)
+    # OpenCV (X-right, Y-down, Z-fwd) -> Three.js (X-right, Y-up, -Z-fwd)
+    assert np.allclose(pts_three, [[0.25, 0.10, -0.72], [-0.15, -0.30, -1.45]], atol=1e-6)
+
+    # Both coordinate transforms must match BASIS_GEMINI_TO_THREE
+    mapped_three = pts_gem @ BASIS_GEMINI_TO_THREE.T
+    assert np.allclose(mapped_three, pts_three, atol=1e-6)
+
+
+def test_local_3d_exif_35mm_landscape_and_portrait_fov() -> None:
+    from app.services.local_metric_3d import extract_exif_image_info
+
+    for (w, h), expected_sensor_mm in [((320, 240), 36.0), ((240, 320), 24.0)]:
+        img = Image.new("RGB", (w, h), color=(140, 145, 150))
+        exif = Image.Exif()
+        exif[41989] = 26  # 26mm equivalent phone main camera
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", exif=exif.tobytes())
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+        rgb, rw, rh, fov_deg = extract_exif_image_info(f"data:image/jpeg;base64,{b64}")
+        expected_fov = round(math.degrees(2.0 * math.atan((expected_sensor_mm * 0.5) / 26.0)), 2)
+        assert (rw, rh) == (w, h)
+        assert rgb.mode == "RGB"
+        assert fov_deg == pytest.approx(expected_fov, abs=0.02)
+
+
+def test_local_3d_lift_mask_and_point_cloud_packing() -> None:
+    from app.services.local_metric_3d import (
+        lift_mask_to_gemini_obb,
+        pack_point_cloud_threejs,
+        render_depth_map_png,
+    )
+
+    h, w = 80, 100
+    xs = np.linspace(-0.08, 0.08, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.06, 0.06, h, dtype=np.float32)[:, None]
+    points_cv = np.zeros((h, w, 3), dtype=np.float32)
+    points_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    points_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    points_cv[..., 2] = 0.85
+
+    mask = np.zeros((h, w), dtype=bool)
+    mask[25:55, 35:65] = True
+    points_cv[mask, 2] = 0.38  # Close-up foreground object at 38 cm
+
+    valid_mask = np.ones((h, w), dtype=bool)
+    box = lift_mask_to_gemini_obb(points_cv, mask, valid_mask)
+    assert box is not None
+    assert 0.34 <= box[1] <= 0.42  # y_fwd around 0.38 m
+    assert 0.01 <= box[3] <= 0.12  # physical width dx in cm-dm scale
+    assert 0.01 <= box[5] <= 0.12  # physical height dz in cm-dm scale
+
+    rgb = np.full((h, w, 3), 128, dtype=np.uint8)
+    pc = pack_point_cloud_threejs(points_cv, rgb, valid_mask, max_points=500)
+    assert pc["count"] == 500
+    pts_decoded = np.frombuffer(base64.b64decode(pc["positions_b64"]), dtype=np.float32).reshape(-1, 3)
+    cols_decoded = np.frombuffer(base64.b64decode(pc["colors_b64"]), dtype=np.uint8).reshape(-1, 3)
+    assert pts_decoded.shape == (500, 3)
+    assert cols_decoded.shape == (500, 3)
+    assert pc["median_depth_m"] > 0.35
+
+    depth_b64, stats = render_depth_map_png(points_cv[..., 2], valid_mask, max_width=80)
+    assert stats["min_m"] == pytest.approx(0.38, abs=0.02)
+    assert stats["max_m"] == pytest.approx(0.85, abs=0.02)
+    with Image.open(io.BytesIO(base64.b64decode(depth_b64))) as depth_img:
+        assert depth_img.format == "PNG"
+        assert depth_img.width <= 80

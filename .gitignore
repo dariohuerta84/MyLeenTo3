@@ -7,3 +7,8 @@ dist/
 .env
 docs/*.html
 docs/preview_*.png
+*.pt
+*.onnx
+*.engine
+mobileclip_*.ts
+

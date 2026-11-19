@@ -6,9 +6,11 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Box, Camera, Compass, Eye, Grid, Layers } from 'lucide-react';
 import type {
   CameraViewMode,
+  DepthStats,
   MeasurementState,
   OcclusionEntry,
   PerObjectMatch,
+  PointCloudData,
   SpatialObject,
 } from '../types/spatial';
 import { computeFovVDeg, formatMeters, normalizeBase64Image } from '../utils/geometry';
@@ -25,6 +27,9 @@ interface Scene3DViewportProps {
   occlusionMatrix: OcclusionEntry[];
   showGroundTruth: boolean;
   showOcclusionRays: boolean;
+  showPointCloud?: boolean;
+  pointCloud?: PointCloudData | null;
+  depthStats?: DepthStats | null;
   unfoldProgress: number; // 0..1
   cameraMode: CameraViewMode;
   onChangeCameraMode: (mode: CameraViewMode) => void;
@@ -47,8 +52,6 @@ const _scratchInterpQuat = new THREE.Quaternion();
 const _identityQuat = new THREE.Quaternion();
 const _scratchScale = new THREE.Vector3();
 
-const FOCAL_PLANE_Z = -0.85; // Three.js forward is -Z
-
 interface CameraPreset {
   pos: [number, number, number];
   target: [number, number, number];
@@ -56,19 +59,39 @@ interface CameraPreset {
 
 function getCameraPreset(
   mode: CameraViewMode,
-  focusPos?: [number, number, number] | null
+  focusPos: [number, number, number] | null | undefined,
+  sceneScale: number
 ): CameraPreset {
-  const focus = focusPos ?? [0, 0.25, -2.8];
+  const safeScale = Math.min(5.5, Math.max(0.45, sceneScale || 2.5));
+  const scaleRatio = Math.min(1.6, Math.max(0.24, safeScale / 2.5));
+  const focus: [number, number, number] = focusPos ?? [0, 0, -safeScale];
   switch (mode) {
     case 'camera_aligned':
-      return { pos: [0, 0, 0.001], target: [0, 0, -2.5] };
+      return { pos: [0, 0, 0.001], target: [0, 0, -Math.max(0.6, safeScale)] };
     case 'bev':
-      return { pos: [focus[0], 7.2, focus[2] + 0.01], target: [focus[0], 0, focus[2]] };
+      return {
+        pos: [focus[0], Math.max(1.3, safeScale * 2.4), focus[2] + 0.01],
+        target: [focus[0], 0, focus[2]],
+      };
     case 'isometric':
-      return { pos: [focus[0] + 3.8, 3.2, focus[2] + 3.8], target: focus };
+      return {
+        pos: [
+          focus[0] + 3.8 * scaleRatio,
+          3.2 * scaleRatio,
+          focus[2] + 3.8 * scaleRatio,
+        ],
+        target: focus,
+      };
     case 'orbit':
     default:
-      return { pos: [focus[0] + 2.4, 1.85, focus[2] + 3.4], target: focus };
+      return {
+        pos: [
+          focus[0] + 2.4 * scaleRatio,
+          1.85 * scaleRatio,
+          focus[2] + 3.4 * scaleRatio,
+        ],
+        target: focus,
+      };
   }
 }
 
@@ -76,8 +99,9 @@ const CameraRig: React.FC<{
   cameraMode: CameraViewMode;
   fovVDeg: number;
   focusTarget: [number, number, number] | null;
+  sceneScale: number;
   transitionNonce: number;
-}> = ({ cameraMode, fovVDeg, focusTarget, transitionNonce }) => {
+}> = ({ cameraMode, fovVDeg, focusTarget, sceneScale, transitionNonce }) => {
   const { camera } = useThree();
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const animatingRef = useRef<boolean>(false);
@@ -91,15 +115,15 @@ const CameraRig: React.FC<{
     }
   }, [camera, fovVDeg]);
 
-  // Trigger smooth camera preset transition on mode or focus change
+  // Trigger smooth camera preset transition on mode, focus, or scale change
   useEffect(() => {
     animatingRef.current = true;
-  }, [cameraMode, focusTarget, transitionNonce]);
+  }, [cameraMode, focusTarget, sceneScale, transitionNonce]);
 
   useFrame((_, rawDelta) => {
     if (!animatingRef.current || userDraggingRef.current) return;
     const dt = Math.min(rawDelta, 0.1);
-    const preset = getCameraPreset(cameraMode, focusTarget);
+    const preset = getCameraPreset(cameraMode, focusTarget, sceneScale);
     _scratchTargetPos.set(...preset.pos);
     _scratchTargetLook.set(...preset.target);
 
@@ -170,6 +194,7 @@ const CameraFrustumAndFocalPlane: React.FC<{
   imageMime: string;
   fovHDeg: number;
   fovVDeg: number;
+  focalPlaneDepth: number;
   unfoldProgress: number;
   cameraMode: CameraViewMode;
 }> = ({
@@ -177,6 +202,7 @@ const CameraFrustumAndFocalPlane: React.FC<{
   imageMime,
   fovHDeg,
   fovVDeg,
+  focalPlaneDepth,
   unfoldProgress,
   cameraMode,
 }) => {
@@ -220,7 +246,7 @@ const CameraFrustumAndFocalPlane: React.FC<{
     };
   }, [texture]);
 
-  const depth = Math.abs(FOCAL_PLANE_Z);
+  const depth = Math.max(0.15, focalPlaneDepth);
   const halfW = depth * Math.tan((fovHDeg * Math.PI) / 360);
   const halfH = depth * Math.tan((fovVDeg * Math.PI) / 360);
 
@@ -396,10 +422,76 @@ const CanvasSpriteLabel: React.FC<{
   );
 };
 
-const MetricOpticalBenchFloor: React.FC<{ cameraMode: CameraViewMode }> = ({
-  cameraMode,
-}) => {
-  const rings = [1, 2, 3, 4, 5, 6];
+function decodeBase64Bytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
+}
+
+const MetricPointCloud: React.FC<{
+  pointCloud?: PointCloudData | null;
+  visible: boolean;
+  pointSize: number;
+}> = ({ pointCloud, visible, pointSize }) => {
+  const geometry = useMemo(() => {
+    if (!pointCloud || pointCloud.count <= 0 || !pointCloud.positions_b64 || !pointCloud.colors_b64) {
+      return null;
+    }
+    try {
+      const posBytes = decodeBase64Bytes(pointCloud.positions_b64);
+      const colBytes = decodeBase64Bytes(pointCloud.colors_b64);
+      if (posBytes.byteLength !== pointCloud.count * 12 || colBytes.byteLength !== pointCloud.count * 3) {
+        return null;
+      }
+      const posF32 = new Float32Array(posBytes.buffer);
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.BufferAttribute(posF32, 3));
+      geom.setAttribute('color', new THREE.BufferAttribute(colBytes, 3, true));
+      geom.computeBoundingSphere();
+      return geom;
+    } catch {
+      return null;
+    }
+  }, [pointCloud]);
+
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
+
+  if (!visible || !geometry) return null;
+
+  return (
+    <points geometry={geometry} renderOrder={1}>
+      <pointsMaterial
+        size={pointSize}
+        sizeAttenuation
+        vertexColors
+        transparent
+        opacity={0.92}
+        toneMapped={false}
+      />
+    </points>
+  );
+};
+
+const MetricOpticalBenchFloor: React.FC<{
+  cameraMode: CameraViewMode;
+  sceneScale: number;
+}> = ({ cameraMode, sceneScale }) => {
+  const safeScale = Math.min(5.5, Math.max(0.45, sceneScale || 2.5));
+  const scaleRatio = Math.min(1.6, Math.max(0.24, safeScale / 2.5));
+  const floorY = -0.58 * scaleRatio;
+  const isCloseUp = safeScale < 1.5;
+
+  const rings = useMemo(
+    () => (isCloseUp ? [0.25, 0.5, 0.75, 1.0, 1.5, 2.0] : [1, 2, 3, 4, 5, 6]),
+    [isCloseUp]
+  );
 
   const ringPointsList = useMemo(() => {
     return rings.map((r) => {
@@ -408,21 +500,21 @@ const MetricOpticalBenchFloor: React.FC<{ cameraMode: CameraViewMode }> = ({
       for (let i = 0; i <= segments; i++) {
         // Semicircle in front of camera (-Z)
         const angle = Math.PI + (i / segments) * Math.PI;
-        pts.push([Math.cos(angle) * r, -0.58, Math.sin(angle) * r]);
+        pts.push([Math.cos(angle) * r, floorY, Math.sin(angle) * r]);
       }
       return { r, pts };
     });
-  }, []);
+  }, [rings, floorY]);
 
   return (
     <group>
       {/* Subtle matte grid on ground plane */}
       <gridHelper
-        args={[16, 16, '#94A3B8', '#CBD5E1']}
-        position={[0, -0.59, -4]}
+        args={isCloseUp ? [6, 12, '#94A3B8', '#CBD5E1'] : [16, 16, '#94A3B8', '#CBD5E1']}
+        position={[0, floorY - 0.01, isCloseUp ? -1.5 : -4]}
       />
 
-      {/* Concentric metric distance arcs 1m..6m */}
+      {/* Concentric metric distance arcs */}
       {ringPointsList.map(({ r, pts }) => (
         <group key={r}>
           <Line
@@ -430,19 +522,19 @@ const MetricOpticalBenchFloor: React.FC<{ cameraMode: CameraViewMode }> = ({
             color="#94A3B8"
             lineWidth={1}
             dashed
-            dashSize={0.14}
-            gapSize={0.1}
+            dashSize={isCloseUp ? 0.05 : 0.14}
+            gapSize={isCloseUp ? 0.04 : 0.1}
             transparent
             opacity={0.75}
           />
           {cameraMode !== 'camera_aligned' && (
             <CanvasSpriteLabel
-              position={[r * 0.45, -0.56, -r * 0.89]}
+              position={[r * 0.45, floorY + Math.max(0.012, 0.02 * scaleRatio), -r * 0.89]}
               lines={[`${r}m`]}
               accentColor="#4B5563"
               borderColor="#CBD5E1"
               backgroundColor="rgba(240, 242, 245, 0.9)"
-              worldHeight={0.11}
+              worldHeight={Math.max(0.055, 0.11 * scaleRatio)}
               depthTest
             />
           )}
@@ -455,6 +547,8 @@ const MetricOpticalBenchFloor: React.FC<{ cameraMode: CameraViewMode }> = ({
 const AnimatedPredictedOBB: React.FC<{
   obj: SpatialObject;
   unfoldProgress: number;
+  focalPlaneDepth: number;
+  scaleRatio: number;
   isSelected: boolean;
   isHovered: boolean;
   isDimmed: boolean;
@@ -464,6 +558,8 @@ const AnimatedPredictedOBB: React.FC<{
 }> = ({
   obj,
   unfoldProgress,
+  focalPlaneDepth,
+  scaleRatio,
   isSelected,
   isHovered,
   isDimmed,
@@ -490,12 +586,13 @@ const AnimatedPredictedOBB: React.FC<{
   const targetSize = pose?.size ?? fallbackSize;
   const forwardDir = pose?.forward_dir_three ?? [0, 0, -1];
 
-  // Projection point onto focal plane z = FOCAL_PLANE_Z
+  // Projection point onto dynamic focal plane z = -focalPlaneDepth
+  const focalZ = -Math.max(0.15, focalPlaneDepth);
   const planeIntersection = useMemo<[number, number, number]>(() => {
-    const z = Math.min(-0.1, targetPos[2]);
-    const t = FOCAL_PLANE_Z / z;
-    return [targetPos[0] * t, targetPos[1] * t, FOCAL_PLANE_Z];
-  }, [targetPos]);
+    const z = Math.min(-0.08, targetPos[2]);
+    const t = focalZ / z;
+    return [targetPos[0] * t, targetPos[1] * t, focalZ];
+  }, [targetPos, focalZ]);
 
   // Smoothly damp position, rotation and scale for 2D -> 3D unfold without setState
   useFrame((_, rawDelta) => {
@@ -530,7 +627,8 @@ const AnimatedPredictedOBB: React.FC<{
   const fillOpacity = isDimmed ? 0.05 : isSelected ? 0.24 : isHovered ? 0.2 : 0.14;
 
   // Forward heading arrow in world space anchored at targetPos
-  const arrowLen = Math.max(0.25, Math.min(0.65, Math.max(...targetSize) * 0.65));
+  const minArrow = Math.max(0.06, 0.22 * scaleRatio);
+  const arrowLen = Math.max(minArrow, Math.min(0.65 * scaleRatio, Math.max(...targetSize) * 0.65));
   const arrowTip: [number, number, number] = [
     targetPos[0] + forwardDir[0] * arrowLen,
     targetPos[1] + forwardDir[1] * arrowLen,
@@ -603,13 +701,13 @@ const AnimatedPredictedOBB: React.FC<{
       {/* Pure WebGL sprite label on selected or hovered object */}
       {(isSelected || isHovered) && (
         <CanvasSpriteLabel
-          position={[targetPos[0], targetPos[1] + targetSize[1] / 2 + 0.18, targetPos[2]]}
+          position={[targetPos[0], targetPos[1] + targetSize[1] / 2 + 0.14 * scaleRatio, targetPos[2]]}
           lines={[
             `${obj.label} · ${formatMeters(obj.distance_m ?? obj.box_3d[1], 2)}`,
           ]}
           accentColor={isSelected ? '#BE123C' : '#1D4ED8'}
           borderColor={isSelected ? '#BE123C' : '#E2E5EA'}
-          worldHeight={0.2}
+          worldHeight={Math.max(0.055, 0.14 * scaleRatio)}
         />
       )}
     </group>
@@ -739,6 +837,9 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   occlusionMatrix,
   showGroundTruth,
   showOcclusionRays,
+  showPointCloud = true,
+  pointCloud,
+  depthStats,
   unfoldProgress,
   cameraMode,
   onChangeCameraMode,
@@ -758,6 +859,29 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
     () => computeFovVDeg(fovHDeg, width || 960, height || 640),
     [fovHDeg, width, height]
   );
+
+  const { sceneScale, scaleRatio, focalPlaneDepth, pointSize } = useMemo(() => {
+    let raw = depthStats?.median_m || pointCloud?.median_depth_m || 0;
+    if (!raw && objects.length > 0) {
+      const ys = objects
+        .map((o) => o.box_3d[1])
+        .filter((v) => Number.isFinite(v) && v > 0)
+        .sort((a, b) => a - b);
+      if (ys.length > 0) {
+        raw = ys[Math.floor(ys.length / 2)];
+      }
+    }
+    const clampedScale = raw > 0 && Number.isFinite(raw) ? Math.min(5.5, Math.max(0.45, raw)) : 2.5;
+    const ratio = Math.min(1.6, Math.max(0.24, clampedScale / 2.5));
+    const planeDepth = Math.min(0.85, Math.max(0.26, clampedScale * 0.42));
+    const pSize = Math.min(0.02, Math.max(0.0045, clampedScale * 0.0075));
+    return {
+      sceneScale: clampedScale,
+      scaleRatio: ratio,
+      focalPlaneDepth: planeDepth,
+      pointSize: pSize,
+    };
+  }, [depthStats, pointCloud, objects]);
 
   // Off-screen WebGL pausing: contentvisibilityautostatechange + IntersectionObserver
   useEffect(() => {
@@ -894,7 +1018,7 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
           dpr={[1, 2]}
           shadows="percentage"
           frameloop={isVisible ? 'always' : 'demand'}
-          camera={{ position: [2.4, 1.85, 0.8], fov: fovVDeg, near: 0.05, far: 80 }}
+          camera={{ position: [2.4, 1.85, 0.8], fov: fovVDeg, near: 0.03, far: 80 }}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
         >
           <color attach="background" args={['#F0F2F5']} />
@@ -914,18 +1038,26 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
             cameraMode={cameraMode}
             fovVDeg={fovVDeg}
             focusTarget={focusTarget}
+            sceneScale={sceneScale}
             transitionNonce={transitionNonce}
           />
 
-          <MetricOpticalBenchFloor cameraMode={cameraMode} />
+          <MetricOpticalBenchFloor cameraMode={cameraMode} sceneScale={sceneScale} />
 
           <CameraFrustumAndFocalPlane
             imageBase64={imageBase64}
             imageMime={imageMime}
             fovHDeg={fovHDeg}
             fovVDeg={fovVDeg}
+            focalPlaneDepth={focalPlaneDepth}
             unfoldProgress={unfoldProgress}
             cameraMode={cameraMode}
+          />
+
+          <MetricPointCloud
+            pointCloud={pointCloud}
+            visible={Boolean(showPointCloud)}
+            pointSize={pointSize}
           />
 
           {/* Predicted OBBs */}
@@ -934,6 +1066,8 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
               key={obj.id}
               obj={obj}
               unfoldProgress={unfoldProgress}
+              focalPlaneDepth={focalPlaneDepth}
+              scaleRatio={scaleRatio}
               isSelected={selectedObjectId === obj.id}
               isHovered={hoveredObjectId === obj.id}
               isDimmed={
@@ -1004,6 +1138,14 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
               <Eye className="h-3 w-3" />
               {modeBadge}
             </span>
+            {pointCloud && pointCloud.count > 0 && showPointCloud && (
+              <>
+                <span className="text-[#CBD5E1]">|</span>
+                <span className="text-[#1D4ED8]">
+                  Nube {pointCloud.count.toLocaleString()} pts
+                </span>
+              </>
+            )}
           </div>
           <div className="font-mono-tech hidden sm:flex items-center gap-2 rounded-lg border border-[#E2E5EA] bg-[#FFFFFF]/92 px-2.5 py-1 text-[10px] text-[#4B5563]">
             <span>Teclas: 1–4 vistas · G GT · M medir · Esc limpiar</span>

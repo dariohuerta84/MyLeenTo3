@@ -183,11 +183,33 @@ export interface BenchmarkScene {
   gt_objects: SpatialObject[];
 }
 
+export interface DepthStats {
+  min_m: number;
+  p10_m: number;
+  median_m: number;
+  p90_m: number;
+  max_m: number;
+}
+
+export interface PointCloudData {
+  count: number;
+  positions_b64: string;
+  colors_b64: string;
+  median_depth_m: number;
+  bounds_three?: {
+    min: [number, number, number];
+    max: [number, number, number];
+  };
+}
+
 export interface HealthResponse {
   status: string;
   gemini_env_configured: boolean;
   supported_models: GeminiModelId[];
   sdk_version?: string;
+  local_metric_3d_available?: boolean;
+  local_3d_device?: string;
+  local_3d_models?: string[];
 }
 
 export interface AnalyzeResponse {
@@ -198,12 +220,20 @@ export interface AnalyzeResponse {
   height: number;
   fov_h_deg: number;
   fov_v_deg: number;
+  fov_source?: string | null;
+  exif_fov_h_deg?: number | null;
+  estimated_moge_fov_h_deg?: number | null;
+  image_base64?: string;
+  mime_type?: string;
   objects: SpatialObject[];
   gt_objects?: SpatialObject[] | null;
   occlusion_matrix: OcclusionEntry[];
   metrics?: SceneMetrics | null;
   fov_sweep?: FovSweepPoint[] | null;
   intrinsic_diagnostics?: IntrinsicDiagnostics | null;
+  depth_map_base64?: string | null;
+  depth_stats?: DepthStats | null;
+  point_cloud?: PointCloudData | null;
   latency_ms: number;
   usage?: Record<string, unknown> | null;
   mode: string;

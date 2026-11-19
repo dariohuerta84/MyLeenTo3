@@ -1,6 +1,7 @@
 import React from 'react';
 import { Crosshair, Eye, Layers, Upload } from 'lucide-react';
 import type {
+  DepthStats,
   MeasurementState,
   SpatialObject,
 } from '../types/spatial';
@@ -15,6 +16,9 @@ interface PinholeOverlay2DProps {
   objects: SpatialObject[];
   gtObjects?: SpatialObject[] | null;
   showGroundTruth: boolean;
+  depthMapBase64?: string | null;
+  depthStats?: DepthStats | null;
+  showDepthMap?: boolean;
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   highlightedIds: string[] | null;
@@ -50,6 +54,9 @@ export const PinholeOverlay2D: React.FC<PinholeOverlay2DProps> = ({
   objects,
   gtObjects,
   showGroundTruth,
+  depthMapBase64,
+  depthStats,
+  showDepthMap = false,
   selectedObjectId,
   hoveredObjectId,
   highlightedIds,
@@ -125,6 +132,32 @@ export const PinholeOverlay2D: React.FC<PinholeOverlay2DProps> = ({
               className="block w-full h-auto select-none"
               draggable={false}
             />
+
+            {showDepthMap && depthMapBase64 && (
+              <img
+                src={normalizeBase64Image(depthMapBase64, 'image/png')}
+                alt="Mapa de profundidad métrica local (MoGe-2)"
+                className="pointer-events-none absolute inset-0 h-full w-full object-fill opacity-85 select-none"
+                draggable={false}
+              />
+            )}
+
+            {showDepthMap && depthStats && (
+              <div className="font-mono-tech pointer-events-none absolute bottom-2 left-2 z-10 inline-flex flex-wrap items-center gap-2 rounded-md border border-[#E2E5EA] bg-[#FFFFFF]/95 px-2.5 py-1 text-[10px] text-[#111827]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-[#B45309]" />
+                  Cerca {depthStats.min_m.toFixed(2)}m
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-[#0F766E]" />
+                  Med {depthStats.median_m.toFixed(2)}m
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-[#1E293B]" />
+                  Lejos {depthStats.max_m.toFixed(2)}m
+                </span>
+              </div>
+            )}
 
             <svg
               viewBox={`0 0 ${safeW} ${safeH}`}

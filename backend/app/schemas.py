@@ -97,6 +97,9 @@ class HealthResponse(BaseModel):
     gemini_env_configured: bool
     supported_models: list[str]
     sdk_version: str
+    local_metric_3d_available: bool = False
+    local_3d_device: str = "disabled"
+    local_3d_models: list[str] = Field(default_factory=list)
 
 
 class BenchmarkSummary(BaseModel):
@@ -127,6 +130,8 @@ class AnalyzeRequest(BaseModel):
     max_objects: int = Field(default=10, ge=1, le=30)
     custom_prompt: Optional[str] = None
     force_demo: bool = False
+    engine: Literal["auto", "moge2_local", "gemini_live", "salience_fallback"] = "auto"
+    auto_fov: bool = True
 
 
 class AnalyzeResponse(BaseModel):
@@ -139,6 +144,9 @@ class AnalyzeResponse(BaseModel):
     height: int
     fov_h_deg: float
     fov_v_deg: float
+    fov_source: Optional[str] = None
+    exif_fov_h_deg: Optional[float] = None
+    estimated_moge_fov_h_deg: Optional[float] = None
     image_base64: str
     mime_type: str
     scene_summary: str = ""
@@ -148,6 +156,9 @@ class AnalyzeResponse(BaseModel):
     metrics: Optional[dict[str, Any]] = None
     fov_sweep: Optional[list[dict[str, Any]]] = None
     intrinsic_diagnostics: Optional[dict[str, Any]] = None
+    depth_map_base64: Optional[str] = None
+    depth_stats: Optional[dict[str, float]] = None
+    point_cloud: Optional[dict[str, Any]] = None
     latency_ms: float
     usage: dict[str, Any]
 

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  AnalyzeResponse,
   AppSection,
   BenchmarkScene,
   CameraViewMode,
+  DepthStats,
   FovSweepPoint,
   GeminiModelId,
   IntrinsicDiagnostics,
   MeasurementState,
   OcclusionEntry,
+  PointCloudData,
   SceneAction,
   SceneMetrics,
   SpatialObject,
@@ -55,6 +58,8 @@ export function App() {
   const [apiKey, setApiKey] = useState<string>('');
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
   const [backendEnvConfigured, setBackendEnvConfigured] = useState(false);
+  const [local3dAvailable, setLocal3dAvailable] = useState(false);
+  const [local3dDevice, setLocal3dDevice] = useState<string>('disabled');
 
   // Scene & Benchmark state
   const [benchmarks, setBenchmarks] = useState<BenchmarkScene[]>([]);
@@ -74,6 +79,11 @@ export function App() {
   const [fovSweep, setFovSweep] = useState<FovSweepPoint[] | null>(null);
   const [intrinsicDiagnostics, setIntrinsicDiagnostics] =
     useState<IntrinsicDiagnostics | null>(null);
+  const [pointCloud, setPointCloud] = useState<PointCloudData | null>(null);
+  const [depthMapBase64, setDepthMapBase64] = useState<string | null>(null);
+  const [depthStats, setDepthStats] = useState<DepthStats | null>(null);
+  const [fovSource, setFovSource] = useState<string | null>(null);
+  const [fovManualOverride, setFovManualOverride] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [modeBadge, setModeBadge] = useState<string>('calibrated_demo');
   const [notice, setNotice] = useState<string | null>(null);
@@ -83,6 +93,8 @@ export function App() {
   const [unfoldProgress, setUnfoldProgress] = useState<number>(1);
   const [showGroundTruth, setShowGroundTruth] = useState<boolean>(true);
   const [showOcclusionRays, setShowOcclusionRays] = useState<boolean>(false);
+  const [showPointCloud, setShowPointCloud] = useState<boolean>(true);
+  const [showDepthMap, setShowDepthMap] = useState<boolean>(false);
   const [measureMode, setMeasureMode] = useState<boolean>(false);
   const [measureFirstId, setMeasureFirstId] = useState<string | null>(null);
   const [cameraMode, setCameraMode] = useState<CameraViewMode>('orbit');
@@ -119,6 +131,33 @@ export function App() {
     }, 30);
   }, []);
 
+  const clearLocal3DTelemetry = useCallback(() => {
+    setPointCloud(null);
+    setDepthMapBase64(null);
+    setDepthStats(null);
+    setFovSource(null);
+    setShowDepthMap(false);
+    setFovManualOverride(false);
+  }, []);
+
+  const applyLocal3DTelemetry = useCallback((res: AnalyzeResponse) => {
+    setPointCloud(res.point_cloud ?? null);
+    setDepthMapBase64(res.depth_map_base64 ?? null);
+    setDepthStats(res.depth_stats ?? null);
+    setFovSource(res.fov_source ?? null);
+    if (res.image_base64) {
+      setImageBase64(res.image_base64);
+      setImageMime(res.mime_type || 'image/png');
+    }
+    if (res.width > 0 && res.height > 0) {
+      setWidth(res.width);
+      setHeight(res.height);
+    }
+    if (res.fov_source && res.fov_source !== 'manual' && Number.isFinite(res.fov_h_deg)) {
+      setFovHDeg(Number(res.fov_h_deg.toFixed(1)));
+    }
+  }, []);
+
   const runBenchmarkAnalysis = useCallback(
     async (
       benchmarkId: string,
@@ -131,6 +170,7 @@ export function App() {
       const target = sceneList.find((b) => b.id === benchmarkId) ?? sceneList[0];
       if (!target) return;
 
+      clearLocal3DTelemetry();
       setActiveBenchmarkId(target.id);
       setCustomImageTitle(null);
       setImageBase64(target.image_base64);
@@ -175,7 +215,7 @@ export function App() {
         setAnalyzing(false);
       }
     },
-    []
+    [clearLocal3DTelemetry]
   );
 
   // Initial load: health + benchmarks + initial benchmark analysis
@@ -190,6 +230,8 @@ export function App() {
         if (!active) return;
         if (health) {
           setBackendEnvConfigured(Boolean(health.gemini_env_configured));
+          setLocal3dAvailable(Boolean(health.local_metric_3d_available));
+          setLocal3dDevice(health.local_3d_device || 'disabled');
         }
         setBenchmarks(list);
         if (list.length > 0) {
@@ -254,6 +296,7 @@ export function App() {
         const w = img.naturalWidth || 960;
         const h = img.naturalHeight || 640;
         setCustomImageTitle(file.name);
+        clearLocal3DTelemetry();
         setImageBase64(base64);
         setImageMime(mimeType);
         setWidth(w);
@@ -274,6 +317,8 @@ export function App() {
               model: selectedModel,
               thinking_level: thinkingLevel,
               fov_h_deg: fovHDeg,
+              engine: 'auto',
+              auto_fov: true,
               max_objects: 10,
             },
             apiKey
@@ -286,6 +331,7 @@ export function App() {
           setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
           setModeBadge(res.mode ?? 'calibrated_demo');
           setNotice(res.notice ?? null);
+          applyLocal3DTelemetry(res);
         } catch (err) {
           setError(
             err instanceof Error ? err.message : 'Error al analizar la foto RGB'
@@ -324,6 +370,8 @@ export function App() {
           model: selectedModel,
           thinking_level: thinkingLevel,
           fov_h_deg: fovHDeg,
+          engine: 'auto',
+          auto_fov: !fovManualOverride,
           max_objects: 10,
         },
         apiKey
@@ -336,6 +384,7 @@ export function App() {
       setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
       setModeBadge(res.mode ?? 'live');
       setNotice(res.notice ?? null);
+      applyLocal3DTelemetry(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al analizar la escena');
     } finally {
@@ -347,6 +396,8 @@ export function App() {
   const handleChangeFovH = useCallback(
     (nextFov: number) => {
       setFovHDeg(nextFov);
+      setFovManualOverride(true);
+      setFovSource('manual');
       const currentObjects = objectsRef.current;
       if (currentObjects.length === 0) return;
 
@@ -539,6 +590,8 @@ export function App() {
             unfoldProgress={unfoldProgress}
             showGroundTruth={showGroundTruth}
             showOcclusionRays={showOcclusionRays}
+            showPointCloud={showPointCloud}
+            showDepthMap={showDepthMap}
             measureMode={measureMode}
             measureFirstId={measureFirstId}
             cameraMode={cameraMode}
@@ -547,6 +600,12 @@ export function App() {
             occlusionMatrix={occlusionMatrix}
             metrics={metrics}
             intrinsicDiagnostics={intrinsicDiagnostics}
+            pointCloud={pointCloud}
+            depthMapBase64={depthMapBase64}
+            depthStats={depthStats}
+            fovSource={fovSource}
+            local3dAvailable={local3dAvailable}
+            local3dDevice={local3dDevice}
             selectedObjectId={selectedObjectId}
             hoveredObjectId={hoveredObjectId}
             highlightedIds={highlightedIds}
@@ -563,6 +622,8 @@ export function App() {
             onChangeUnfoldProgress={setUnfoldProgress}
             onToggleGroundTruth={() => setShowGroundTruth((v) => !v)}
             onToggleOcclusionRays={() => setShowOcclusionRays((v) => !v)}
+            onTogglePointCloud={() => setShowPointCloud((v) => !v)}
+            onToggleDepthMap={() => setShowDepthMap((v) => !v)}
             onToggleMeasureMode={() => {
               setMeasureMode((v) => !v);
               setMeasureFirstId(null);

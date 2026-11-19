@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import {
   AlertCircle,
+  Box,
+  Compass,
   Eye,
   Layers,
   Loader2,
@@ -14,10 +16,12 @@ import {
 import type {
   BenchmarkScene,
   CameraViewMode,
+  DepthStats,
   GeminiModelId,
   IntrinsicDiagnostics,
   MeasurementState,
   OcclusionEntry,
+  PointCloudData,
   SceneAction,
   SceneMetrics,
   SpatialObject,
@@ -42,6 +46,8 @@ interface LabWorkspaceProps {
   unfoldProgress: number;
   showGroundTruth: boolean;
   showOcclusionRays: boolean;
+  showPointCloud?: boolean;
+  showDepthMap?: boolean;
   measureMode: boolean;
   measureFirstId: string | null;
   cameraMode: CameraViewMode;
@@ -50,6 +56,12 @@ interface LabWorkspaceProps {
   occlusionMatrix: OcclusionEntry[];
   metrics?: SceneMetrics | null;
   intrinsicDiagnostics?: IntrinsicDiagnostics | null;
+  pointCloud?: PointCloudData | null;
+  depthMapBase64?: string | null;
+  depthStats?: DepthStats | null;
+  fovSource?: string | null;
+  local3dAvailable?: boolean;
+  local3dDevice?: string;
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   highlightedIds: string[] | null;
@@ -66,6 +78,8 @@ interface LabWorkspaceProps {
   onChangeUnfoldProgress: (val: number) => void;
   onToggleGroundTruth: () => void;
   onToggleOcclusionRays: () => void;
+  onTogglePointCloud?: () => void;
+  onToggleDepthMap?: () => void;
   onToggleMeasureMode: () => void;
   onChangeCameraMode: (mode: CameraViewMode) => void;
   onAnalyzeScene: () => void;
@@ -89,6 +103,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   unfoldProgress,
   showGroundTruth,
   showOcclusionRays,
+  showPointCloud = true,
+  showDepthMap = false,
   measureMode,
   measureFirstId,
   cameraMode,
@@ -97,6 +113,12 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   occlusionMatrix,
   metrics,
   intrinsicDiagnostics,
+  pointCloud,
+  depthMapBase64,
+  depthStats,
+  fovSource,
+  local3dAvailable = false,
+  local3dDevice,
   selectedObjectId,
   hoveredObjectId,
   highlightedIds,
@@ -113,6 +135,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   onChangeUnfoldProgress,
   onToggleGroundTruth,
   onToggleOcclusionRays,
+  onTogglePointCloud,
+  onToggleDepthMap,
   onToggleMeasureMode,
   onChangeCameraMode,
   onAnalyzeScene,
@@ -213,23 +237,37 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
           <div className="hidden h-5 w-px bg-[#E2E5EA] lg:block" />
 
           {/* FOV_h live slider */}
-          <div className="flex items-center gap-2 min-w-[185px]">
+          <div className="flex items-center gap-2 min-w-[205px]">
             <label
               htmlFor="fov-slider"
               className="font-mono-tech text-xs font-medium text-[#111827] whitespace-nowrap"
             >
-              FOV_h {fovHDeg.toFixed(0)}°
+              FOV_h {fovHDeg.toFixed(1)}°
             </label>
             <input
               id="fov-slider"
               type="range"
-              min={40}
-              max={110}
-              step={1}
+              min={25}
+              max={120}
+              step={0.5}
               value={fovHDeg}
               onChange={(e) => onChangeFovH(Number(e.target.value))}
               className="optical-slider w-24 sm:w-28"
             />
+            {fovSource && (
+              <span
+                className="font-mono-tech rounded border border-[#E2E5EA] bg-[#F7F7F5] px-1.5 py-0.5 text-[10px] text-[#4B5563]"
+                title="Fuente de distancia focal / FOV horizontal"
+              >
+                {fovSource === 'moge2_intrinsics'
+                  ? 'MoGe-2'
+                  : fovSource === 'exif_35mm'
+                  ? 'EXIF'
+                  : fovSource === 'manual'
+                  ? 'Manual'
+                  : fovSource}
+              </span>
+            )}
           </div>
 
           {/* 2D -> 3D Unfold Scrubber */}
@@ -320,22 +358,69 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
               <span>Medir</span>
               <kbd className="font-mono-tech text-[10px] opacity-70">M</kbd>
             </button>
+
+            <button
+              type="button"
+              onClick={() => onTogglePointCloud?.()}
+              disabled={!pointCloud || pointCloud.count === 0}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-45 ${
+                showPointCloud && pointCloud && pointCloud.count > 0
+                  ? 'border-[#1D4ED8] bg-[#1D4ED8]/10 text-[#1D4ED8]'
+                  : 'border-[#E2E5EA] bg-[#FFFFFF] text-[#4B5563] hover:text-[#111827]'
+              }`}
+              title="Mostrar/ocultar nube de puntos 3D métrica (MoGe-2)"
+            >
+              <Box className="h-3.5 w-3.5" />
+              <span>Nube 3D</span>
+              {pointCloud && pointCloud.count > 0 && (
+                <span className="font-mono-tech text-[10px] opacity-80">
+                  {pointCloud.count >= 1000
+                    ? `${Math.round(pointCloud.count / 1000)}k`
+                    : pointCloud.count}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onToggleDepthMap?.()}
+              disabled={!depthMapBase64}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-45 ${
+                showDepthMap && depthMapBase64
+                  ? 'border-[#0F766E] bg-[#0F766E]/10 text-[#0F766E]'
+                  : 'border-[#E2E5EA] bg-[#FFFFFF] text-[#4B5563] hover:text-[#111827]'
+              }`}
+              title="Superponer mapa de profundidad métrica sobre la foto 2D"
+            >
+              <Compass className="h-3.5 w-3.5" />
+              <span>Profundidad</span>
+            </button>
           </div>
 
           {/* Primary analyze action */}
-          <button
-            type="button"
-            onClick={onAnalyzeScene}
-            disabled={analyzing}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#1E40AF] disabled:opacity-60"
-          >
-            {analyzing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
+          <div className="ml-auto flex items-center gap-2">
+            {local3dAvailable && (
+              <span
+                className="font-mono-tech hidden items-center rounded-md border border-[#E2E5EA] bg-[#F7F7F5] px-2 py-1 text-[10px] text-[#0F766E] 2xl:inline-flex"
+                title={local3dDevice || 'GPU Métrica Local'}
+              >
+                MoGe-2 GPU
+              </span>
             )}
-            <span>Analizar Escena</span>
-          </button>
+            <button
+              type="button"
+              onClick={onAnalyzeScene}
+              disabled={analyzing}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D4ED8] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#1E40AF] disabled:opacity-60"
+            >
+              {analyzing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              <span>Analizar Escena</span>
+            </button>
+          </div>
         </div>
 
         {/* Optional notice / error / active subset banner */}
@@ -460,6 +545,9 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
             objects={objects}
             gtObjects={gtObjects}
             showGroundTruth={showGroundTruth}
+            depthMapBase64={depthMapBase64}
+            depthStats={depthStats}
+            showDepthMap={showDepthMap}
             selectedObjectId={selectedObjectId}
             hoveredObjectId={hoveredObjectId}
             highlightedIds={highlightedIds}
@@ -485,6 +573,9 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
             occlusionMatrix={occlusionMatrix}
             showGroundTruth={showGroundTruth}
             showOcclusionRays={showOcclusionRays}
+            showPointCloud={showPointCloud}
+            pointCloud={pointCloud}
+            depthStats={depthStats}
             unfoldProgress={unfoldProgress}
             cameraMode={cameraMode}
             onChangeCameraMode={onChangeCameraMode}

@@ -114,6 +114,7 @@ def test_analyze_benchmark_offline_calibrated_demo(monkeypatch: pytest.MonkeyPat
 
 def test_analyze_custom_image_offline_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("MYLEENTO3_LOCAL_3D_ENGINE", "0")
     b64 = _make_sample_png_base64(480, 320)
     resp = client.post(
         "/api/analyze",
@@ -138,6 +139,62 @@ def test_analyze_custom_image_offline_fallback(monkeypatch: pytest.MonkeyPatch) 
         "ESCALAR_MODELO",
         "RECHAZADO_FISICA",
     }
+
+
+def test_analyze_custom_image_local_moge2_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    b64 = _make_sample_png_base64(360, 620)
+    fake_pc_pts = base64.b64encode(b"\x00" * 12 * 3).decode("ascii")
+    fake_pc_cols = base64.b64encode(b"\x80" * 3 * 3).decode("ascii")
+    mock_result = {
+        "mode": "moge2_yoloe_gpu",
+        "model_desc": "moge-2-vits-normal + YOLOE-OV (Mock RTX 3050)",
+        "width": 360,
+        "height": 620,
+        "image_base64": b64,
+        "mime_type": "image/png",
+        "effective_fov_h_deg": 37.5,
+        "fov_source": "moge2_intrinsics",
+        "exif_fov_h_deg": None,
+        "estimated_moge_fov_h_deg": 37.5,
+        "objects": [
+            {
+                "id": "moge_1",
+                "label": "electronic_device",
+                "box_3d": [-0.04, 0.63, 0.02, 0.12, 0.03, 0.08, 0.0, 0.0, 0.0],
+                "confidence": 0.42,
+            }
+        ],
+        "scene_summary": "Reconstrucción métrica local mock a 0.63 m.",
+        "depth_map_base64": b64,
+        "depth_stats": {"min_m": 0.47, "p10_m": 0.54, "median_m": 0.66, "p90_m": 0.89, "max_m": 1.18},
+        "point_cloud": {
+            "count": 3,
+            "positions_b64": fake_pc_pts,
+            "colors_b64": fake_pc_cols,
+            "median_depth_m": 0.66,
+            "bounds_three": {"min": [-0.2, -0.3, -1.1], "max": [0.2, 0.3, -0.4]},
+        },
+        "latency_ms": 312.5,
+    }
+    with (
+        patch("app.main.is_local_3d_available", return_value=True),
+        patch("app.main.run_local_metric_3d", return_value=mock_result),
+    ):
+        resp = client.post(
+            "/api/analyze",
+            json={"image_base64": b64, "fov_h_deg": 60.0, "engine": "auto", "auto_fov": True},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "moge2_yoloe_gpu"
+    assert data["fov_h_deg"] == 37.5
+    assert data["fov_source"] == "moge2_intrinsics"
+    assert data["depth_map_base64"] == b64
+    assert data["depth_stats"]["median_m"] == 0.66
+    assert data["point_cloud"]["count"] == 3
+    assert len(data["objects"]) == 1
+    assert data["objects"][0]["distance_m"] < 0.8
 
 
 def test_analyze_validation_errors() -> None:

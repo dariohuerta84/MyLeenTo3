@@ -69,6 +69,8 @@ export interface AnalyzePayload {
   max_objects?: number;
   custom_prompt?: string;
   force_demo?: boolean;
+  engine?: 'auto' | 'moge2_local' | 'gemini_live' | 'salience_fallback';
+  auto_fov?: boolean;
 }
 
 export async function analyzeScene(

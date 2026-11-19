@@ -7,7 +7,8 @@
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![React 19 + Three.js](https://img.shields.io/badge/Frontend-React_19_+_Three.js-1D4ED8?style=for-the-badge&logo=threedotjs&logoColor=white)
 ![Google AI Studio v1](https://img.shields.io/badge/Gemini-Interactions_API_v1-0F766E?style=for-the-badge&logo=googlegemini&logoColor=white)
-![Pytest 38/38](https://img.shields.io/badge/Pytest-38%2F38_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
+![MoGe-2 + YOLOE GPU](https://img.shields.io/badge/3D_Local-MoGe--2_%2B_YOLOE_GPU-1D4ED8?style=for-the-badge)
+![Pytest 42/42](https://img.shields.io/badge/Pytest-42%2F42_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
 ![SEED 42](https://img.shields.io/badge/Reproducibility-SEED_%3D_42-B45309?style=for-the-badge)
 [![Predecesor 2D](https://img.shields.io/badge/Evolución_de-C8286_Visión_2D-4B5563?style=for-the-badge&logo=github)](https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN)
 
@@ -112,6 +113,7 @@ flowchart LR
         API["REST API (/api/* · 9 Endpoints)"]
         GEO["core/geometry_3d.py (ZYX, Rx(-90°), Pinhole K, SAT, Kay-Kajiya)"]
         DIA["core/intrinsic_diagnostics.py (PECS, PVI, GFI, SDAS, cascade_policy)"]
+        L3D["services/local_metric_3d.py (EXIF 35mm + MoGe-2 ViT-S + YOLOE-OV)"]
         SVC["services/gemini_vision.py & spatial_agent.py"]
     end
 
@@ -119,25 +121,27 @@ flowchart LR
         INT["Interactions API (gemini-4-hydrogen | argon | 3.5-flash-lite)"]
     end
 
-    UI -->|JSON / Base64| API
-    V2D <-->|Sincronización 2D-3D| V3D
+    UI -->|JSON / Base64 + Nube 3D / Profundidad| API
+    V2D <-->|Sincronización 2D-3D + Depth Map| V3D
     COP <-->|scene_actions| V3D
     API --> GEO
     API --> DIA
+    API --> L3D
     API --> SVC
     SVC <-->|Opcional con API Key| INT
 ```
 
 <details>
-<summary><strong>📐 Formulación Matemática 9-DOF, Cambio de Base Quiral y Compuerta Sin Referencia</strong></summary>
+<summary><strong>📐 Formulación Matemática 9-DOF, Reconstrucción Métrica Local y Compuerta Sin Referencia</strong></summary>
 
 1. **Representación 9-DOF (Gemini Frame: $X$ derecha, $Y$ profundidad, $Z$ arriba):**
    $$\mathbf{b} = [x, y, z, \Delta x, \Delta y, \Delta z, r, p, \psi] \in \mathbb{R}^9$$
    con cuaternión intrínseco ZYX y matriz ortogonal de preservación quiral hacia Three.js $M = R_x(-90^\circ) \in SO(3)$ ($\det(M) = +1$):
    $$\mathbf{p}_{\text{three}} = \begin{pmatrix} x \\ z \\ -y \end{pmatrix}, \qquad R_{\text{three}} = M R_{\text{gem}} M^\top, \qquad \mathbf{s}_{\text{three}} = (\Delta x, \Delta z, \Delta y)$$
-2. **Proyección Pinhole y Campo Vertical:** $f = W / (2\tan(\text{FOV}_h/2))$, $\text{FOV}_v = 2\arctan(\tan(\text{FOV}_h/2)\cdot H/W)$.
-3. **Métricas Exactas y Trazado de Rayos:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$) y matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera.
-4. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
+2. **Motor Métrico Local GPU (`EXIF + MoGe-2 ViT-S + YOLOE-OV`):** extrae `FocalLengthIn35mmFilm` y transposición EXIF, infiere nube densa métrica $(X_{\text{cv}}, Y_{\text{cv}}, Z_{\text{cv}})$ en metros junto con $\text{FOV}_h$ automático (`Ruicheng/moge-2-vits-normal`, `~1.3 GB` VRAM FP16), segmenta instancias abiertas (`yoloe-11s-seg.pt`), eleva máscaras a cuboides 9-DOF orientados y exporta nube de puntos 3D coloreada (`THREE.Points`, hasta 16,000 vértices) más mapa de profundidad mate (`#B45309` cerca $\to$ `#0F766E` $\to$ `#1E293B` lejos) con encuadre dinámico macro-a-habitación.
+3. **Proyección Pinhole y Campo Vertical:** $f = W / (2\tan(\text{FOV}_h/2))$, $\text{FOV}_v = 2\arctan(\tan(\text{FOV}_h/2)\cdot H/W)$.
+4. **Métricas Exactas y Trazado de Rayos:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$) y matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera.
+5. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
 
 </details>
 
@@ -170,10 +174,13 @@ cd MyLeenTo3
 ```
 Levanta automáticamente FastAPI en **`http://127.0.0.1:8085`** y React/Vite en **`http://127.0.0.1:5173`**. Para usar inferencia **live** con tus propias fotografías, haz clic en **API Key** dentro de la aplicación (la clave se conserva solo en memoria de sesión vía `X-Gemini-API-Key`).
 
-### Pruebas, Evaluación de Fotos y Recompilación de Reportes
+### Pruebas, Motor Local GPU y Recompilación de Reportes
 ```bash
-# 1. Suite completa de 38 pruebas deterministas (geometría, API y compuerta)
-backend/.venv/bin/pytest -v
+# 1. Opcional: dependencias PyTorch CUDA + MoGe-2 + YOLOE para reconstrucción métrica local GPU
+uv pip install --python backend/.venv/bin/python -r backend/requirements-local-3d.txt
+
+# 2. Suite completa de 42 pruebas deterministas offline (geometría, métricas 3D locales, API y compuerta)
+MYLEENTO3_LOCAL_3D_ENGINE=0 backend/.venv/bin/pytest -v
 
 # 2. Pruebas en vivo HTTP de los 3 modelos + 3 fotos diversas (requiere servidor en :8085)
 backend/.venv/bin/python backend/scripts/run_photo_model_tests.py

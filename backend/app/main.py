@@ -52,6 +52,12 @@ from app.services.gemini_vision import (
     resolve_thinking_level,
     strip_data_uri,
 )
+from app.services.local_metric_3d import (
+    extract_depth_and_point_cloud,
+    get_local_3d_status,
+    is_local_3d_available,
+    run_local_metric_3d,
+)
 from app.services.spatial_agent import run_spatial_copilot
 
 app = FastAPI(
@@ -122,11 +128,15 @@ def _extract_demo_prediction(benchmark: dict[str, Any], model: str) -> tuple[lis
 
 @app.get("/api/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
+    local_status = get_local_3d_status()
     return HealthResponse(
         status="ok",
         gemini_env_configured=bool(os.getenv("GEMINI_API_KEY", "").strip()),
         supported_models=SUPPORTED_MODELS,
         sdk_version=getattr(genai, "__version__", "unknown"),
+        local_metric_3d_available=bool(local_status["available"]),
+        local_3d_device=str(local_status["device"]),
+        local_3d_models=list(local_status["models"]),
     )
 
 
@@ -185,8 +195,33 @@ def analyze_scene(
     raw_objects: list[dict[str, Any]] = []
     latency_ms = 0.0
     usage: dict[str, Any] = {"input_tokens": 0, "output_tokens": 0, "thought_tokens": 0, "total_tokens": 0}
+    effective_fov_h_deg = float(req.fov_h_deg)
+    fov_source = "manual"
+    exif_fov_h_deg: Optional[float] = None
+    estimated_moge_fov_h_deg: Optional[float] = None
+    depth_map_base64: Optional[str] = None
+    depth_stats: Optional[dict[str, float]] = None
+    point_cloud: Optional[dict[str, Any]] = None
 
-    if api_key and not req.force_demo:
+    use_local_depth = req.engine != "salience_fallback" and is_local_3d_available()
+
+    if api_key and req.engine in ("auto", "gemini_live") and not req.force_demo:
+        if benchmark is None and use_local_depth:
+            try:
+                depth_ctx = extract_depth_and_point_cloud(
+                    image_b64,
+                    fov_override_deg=effective_fov_h_deg,
+                    auto_fov=req.auto_fov,
+                )
+                effective_fov_h_deg = float(depth_ctx["effective_fov_h_deg"])
+                fov_source = str(depth_ctx["fov_source"])
+                exif_fov_h_deg = depth_ctx["exif_fov_h_deg"]
+                estimated_moge_fov_h_deg = depth_ctx["estimated_moge_fov_h_deg"]
+                depth_map_base64 = depth_ctx["depth_map_base64"]
+                depth_stats = depth_ctx["depth_stats"]
+                point_cloud = depth_ctx["point_cloud"]
+            except Exception:
+                pass
         try:
             live = detect_3d_objects_live(
                 api_key=api_key,
@@ -194,7 +229,7 @@ def analyze_scene(
                 mime_type=mime_type,
                 model=req.model,
                 thinking_level=thinking_level,
-                fov_h_deg=req.fov_h_deg,
+                fov_h_deg=effective_fov_h_deg,
                 max_objects=req.max_objects,
                 custom_prompt=req.custom_prompt,
             )
@@ -205,20 +240,72 @@ def analyze_scene(
             mode = "live_gemini"
             notice = None
         except Exception as exc:
-            mode = "deterministic_fallback"
-            notice = (
-                f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
-                "se activó el modo de respaldo calibrado/determinista."
-            )
-            if benchmark is not None:
+            if benchmark is not None and req.engine != "moge2_local":
+                mode = "deterministic_fallback"
+                notice = (
+                    f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
+                    "se activó el modo de respaldo calibrado/determinista."
+                )
                 raw_objects, latency_ms, usage = _extract_demo_prediction(benchmark, req.model)
                 raw_objects = raw_objects[: req.max_objects]
                 scene_summary = f"Respaldo calibrado para {benchmark['title']} ({req.model})."
+            elif use_local_depth:
+                try:
+                    local_res = run_local_metric_3d(
+                        image_b64,
+                        fov_override_deg=effective_fov_h_deg,
+                        auto_fov=req.auto_fov,
+                        max_objects=req.max_objects,
+                        custom_prompt=req.custom_prompt,
+                    )
+                    image_b64 = local_res["image_base64"]
+                    mime_type = local_res["mime_type"]
+                    width = int(local_res["width"])
+                    height = int(local_res["height"])
+                    effective_fov_h_deg = float(local_res["effective_fov_h_deg"])
+                    fov_source = str(local_res["fov_source"])
+                    exif_fov_h_deg = local_res["exif_fov_h_deg"]
+                    estimated_moge_fov_h_deg = local_res["estimated_moge_fov_h_deg"]
+                    raw_objects = local_res["objects"]
+                    scene_summary = local_res["scene_summary"]
+                    depth_map_base64 = local_res["depth_map_base64"]
+                    depth_stats = local_res["depth_stats"]
+                    point_cloud = local_res["point_cloud"]
+                    latency_ms = local_res["latency_ms"]
+                    mode = local_res["mode"]
+                    notice = (
+                        f"Google AI Studio live no disponible ({type(exc).__name__}); "
+                        f"reconstrucción métrica local activa vía {local_res['model_desc']}."
+                    )
+                except Exception:
+                    fb = build_deterministic_fallback_detections(
+                        width=width,
+                        height=height,
+                        fov_h_deg=effective_fov_h_deg,
+                        model=req.model,
+                        thinking_level=thinking_level,
+                        max_objects=req.max_objects,
+                        image_base64=image_b64,
+                    )
+                    raw_objects = fb["objects"]
+                    scene_summary = fb["scene_summary"]
+                    latency_ms = fb["latency_ms"]
+                    usage = fb["usage"]
+                    mode = "deterministic_fallback"
+                    notice = (
+                        f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
+                        "se activó el modo de respaldo determinista."
+                    )
             else:
+                mode = "deterministic_fallback"
+                notice = (
+                    f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
+                    "se activó el modo de respaldo calibrado/determinista."
+                )
                 fb = build_deterministic_fallback_detections(
                     width=width,
                     height=height,
-                    fov_h_deg=req.fov_h_deg,
+                    fov_h_deg=effective_fov_h_deg,
                     model=req.model,
                     thinking_level=thinking_level,
                     max_objects=req.max_objects,
@@ -229,7 +316,7 @@ def analyze_scene(
                 latency_ms = fb["latency_ms"]
                 usage = fb["usage"]
     else:
-        if benchmark is not None:
+        if benchmark is not None and req.engine != "moge2_local":
             raw_objects, latency_ms, usage = _extract_demo_prediction(benchmark, req.model)
             raw_objects = raw_objects[: req.max_objects]
             mode = "calibrated_demo"
@@ -241,11 +328,59 @@ def analyze_scene(
                     "Sin API Key de Google AI Studio configurada: ejecutando benchmark calibrado reproducible "
                     "(SEED=42). Ingresa tu clave en el botón API Key para inferencia live."
                 )
+        elif req.engine in ("auto", "moge2_local") and not req.force_demo and is_local_3d_available():
+            try:
+                local_res = run_local_metric_3d(
+                    image_b64,
+                    fov_override_deg=effective_fov_h_deg,
+                    auto_fov=req.auto_fov,
+                    max_objects=req.max_objects,
+                    custom_prompt=req.custom_prompt,
+                )
+                image_b64 = local_res["image_base64"]
+                mime_type = local_res["mime_type"]
+                width = int(local_res["width"])
+                height = int(local_res["height"])
+                effective_fov_h_deg = float(local_res["effective_fov_h_deg"])
+                fov_source = str(local_res["fov_source"])
+                exif_fov_h_deg = local_res["exif_fov_h_deg"]
+                estimated_moge_fov_h_deg = local_res["estimated_moge_fov_h_deg"]
+                raw_objects = local_res["objects"]
+                scene_summary = local_res["scene_summary"]
+                depth_map_base64 = local_res["depth_map_base64"]
+                depth_stats = local_res["depth_stats"]
+                point_cloud = local_res["point_cloud"]
+                latency_ms = local_res["latency_ms"]
+                mode = local_res["mode"]
+                notice = (
+                    f"Reconstrucción métrica local real en {local_res['model_desc']}: "
+                    f"rango {depth_stats['min_m']:.2f}–{depth_stats['max_m']:.2f} m "
+                    f"(FOV_h={effective_fov_h_deg:.1f}° vía {fov_source})."
+                )
+            except Exception as exc:
+                fb = build_deterministic_fallback_detections(
+                    width=width,
+                    height=height,
+                    fov_h_deg=effective_fov_h_deg,
+                    model=req.model,
+                    thinking_level=thinking_level,
+                    max_objects=req.max_objects,
+                    image_base64=image_b64,
+                )
+                raw_objects = fb["objects"]
+                scene_summary = fb["scene_summary"]
+                latency_ms = fb["latency_ms"]
+                usage = fb["usage"]
+                mode = "deterministic_fallback"
+                notice = (
+                    f"Motor métrico local MoGe-2 falló ({type(exc).__name__}); "
+                    "usando extractor de saliencia sin referencia."
+                )
         else:
             fb = build_deterministic_fallback_detections(
                 width=width,
                 height=height,
-                fov_h_deg=req.fov_h_deg,
+                fov_h_deg=effective_fov_h_deg,
                 model=req.model,
                 thinking_level=thinking_level,
                 max_objects=req.max_objects,
@@ -261,10 +396,10 @@ def analyze_scene(
                 "sin referencia (sin X-Gemini-API-Key / GEMINI_API_KEY)."
             )
 
-    fov_v_deg = round(compute_fov_v_deg(req.fov_h_deg, width, height), 4)
-    enriched_objects = [_enrich_object(obj, width, height, req.fov_h_deg) for obj in raw_objects]
+    fov_v_deg = round(compute_fov_v_deg(effective_fov_h_deg, width, height), 4)
+    enriched_objects = [_enrich_object(obj, width, height, effective_fov_h_deg) for obj in raw_objects]
     enriched_gt = (
-        [_enrich_object(obj, width, height, req.fov_h_deg) for obj in gt_raw]
+        [_enrich_object(obj, width, height, effective_fov_h_deg) for obj in gt_raw]
         if gt_raw is not None
         else None
     )
@@ -274,14 +409,14 @@ def analyze_scene(
         image_b64,
         width,
         height,
-        req.fov_h_deg,
+        effective_fov_h_deg,
         occlusion_matrix=occlusion_matrix,
     )
 
     metrics = None
     fov_sweep = intrinsic_diagnostics["reference_free_fov_sweep"]
     if gt_raw is not None:
-        metrics = evaluate_scene_predictions(raw_objects, gt_raw, width, height, req.fov_h_deg)
+        metrics = evaluate_scene_predictions(raw_objects, gt_raw, width, height, effective_fov_h_deg)
         fov_sweep = fov_sensitivity_sweep(raw_objects, gt_raw, width, height)
 
     return AnalyzeResponse(
@@ -292,8 +427,11 @@ def analyze_scene(
         notice=notice,
         width=width,
         height=height,
-        fov_h_deg=req.fov_h_deg,
+        fov_h_deg=effective_fov_h_deg,
         fov_v_deg=fov_v_deg,
+        fov_source=fov_source,
+        exif_fov_h_deg=exif_fov_h_deg,
+        estimated_moge_fov_h_deg=estimated_moge_fov_h_deg,
         image_base64=image_b64,
         mime_type=mime_type,
         scene_summary=scene_summary,
@@ -303,6 +441,9 @@ def analyze_scene(
         metrics=metrics,
         fov_sweep=fov_sweep,
         intrinsic_diagnostics=intrinsic_diagnostics,
+        depth_map_base64=depth_map_base64,
+        depth_stats=depth_stats,
+        point_cloud=point_cloud,
         latency_ms=latency_ms,
         usage=usage,
     )
