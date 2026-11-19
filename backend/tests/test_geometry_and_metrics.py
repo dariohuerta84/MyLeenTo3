@@ -895,3 +895,89 @@ def test_reproject_canonical_fov_depth_rescaling_and_scene_graph() -> None:
     assert len(sg) == 1
     assert sg[0]["relation_horizontal"] == "left"
     assert sg[0]["relation_depth"] == "in_front"
+
+
+def test_dense_adaptive_surfel_packing_with_normals_relief_and_body_budget() -> None:
+    from app.core.real_photo_metrics import fit_ransac_dominant_plane
+    from app.services.local_metric_3d import pack_point_cloud_threejs
+
+    h, w = 100, 120  # 12,000 total pixels
+    xs = np.linspace(-0.5, 0.5, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.4, 0.4, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    pts_cv[..., 2] = 1.60  # background wall
+
+    # Small foreground body (<15% of image): 1800 px protruding 0.25m in front of wall
+    fg_mask = np.zeros((h, w), dtype=bool)
+    fg_mask[30:60, 40:100] = True
+    pts_cv[fg_mask, 2] = 1.35
+
+    rgb_u8 = np.full((h, w, 3), 120, dtype=np.uint8)
+    rgb_u8[fg_mask] = [30, 110, 220]
+    valid = np.ones((h, w), dtype=bool)
+    normals_cv = np.zeros((h, w, 3), dtype=np.float32)
+    normals_cv[..., 2] = -1.0  # OpenCV camera-facing normal -> Three.js (0, 0, +1)
+
+    ransac = fit_ransac_dominant_plane(pts_cv, valid, seed=42)
+    pc = pack_point_cloud_threejs(
+        pts_cv,
+        rgb_u8,
+        valid,
+        max_points=2000,
+        normals_cv=normals_cv,
+        instance_masks=[fg_mask],
+        object_ids=["moge_1"],
+        ransac_plane=ransac,
+        include_surface_mesh=True,
+    )
+    assert pc["count"] == 2000
+    assert pc["has_normals"] is True
+    assert pc["object_id_palette"] == ["moge_1"]
+    # Foreground is 15% of frame, yet adaptive sampling devotes ~72% of surfels to the body
+    assert pc["body_point_count"] >= 1350
+
+    nrm = np.frombuffer(base64.b64decode(pc["normals_b64"]), dtype=np.int8).reshape(-1, 3)
+    assert nrm.shape == (2000, 3)
+    assert float(np.median(nrm[:, 2])) >= 120.0  # Three.js +Z toward camera
+
+    obj_idx = np.frombuffer(base64.b64decode(pc["object_indices_b64"]), dtype=np.uint8)
+    rel_mm = np.frombuffer(base64.b64decode(pc["relief_cm_b64"]), dtype=np.uint16)
+    assert int(np.sum(obj_idx == 1)) == pc["body_point_count"]
+    fg_rel = rel_mm[obj_idx == 1]
+    assert float(np.median(fg_rel)) == pytest.approx(250.0, abs=25.0)
+    assert pc["surface_mesh"] is not None
+
+
+def test_depth_discontinuity_aware_surface_mesh_rejects_flying_triangles() -> None:
+    from app.services.local_metric_3d import _compute_threejs_normals, build_surface_mesh_threejs
+
+    h, w = 80, 100
+    xs = np.linspace(-0.4, 0.4, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.3, 0.3, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    pts_cv[..., 2] = 1.80  # Three.js z = -1.80
+
+    fg = np.zeros((h, w), dtype=bool)
+    fg[20:60, 25:75] = True
+    pts_cv[fg, 2] = 0.55  # sharp 3.27x depth step (flying pixels if blindly meshed)
+
+    rgb_u8 = np.full((h, w, 3), 200, dtype=np.uint8)
+    valid = np.ones((h, w), dtype=bool)
+    nrm_three = _compute_threejs_normals(pts_cv, None)
+    mesh = build_surface_mesh_threejs(pts_cv, rgb_u8, valid, nrm_three, target_width=100, max_rel_depth_jump=0.06)
+    assert mesh is not None
+    assert mesh["vertex_count"] > 100
+    assert mesh["triangle_count"] > 100
+
+    verts = np.frombuffer(base64.b64decode(mesh["positions_b64"]), dtype=np.float32).reshape(-1, 3)
+    tris = np.frombuffer(base64.b64decode(mesh["indices_b64"]), dtype=np.uint32).reshape(-1, 3)
+    assert int(tris.max()) < mesh["vertex_count"]
+
+    tri_z = verts[tris, 2]
+    z_spans = np.max(tri_z, axis=1) - np.min(tri_z, axis=1)
+    # Zero stretched triangles may bridge the 1.25m foreground-to-wall cliff
+    assert float(np.max(z_spans)) < 0.12

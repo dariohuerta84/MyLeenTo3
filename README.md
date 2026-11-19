@@ -8,7 +8,7 @@
 ![React 19 + Three.js](https://img.shields.io/badge/Frontend-React_19_+_Three.js-1D4ED8?style=for-the-badge&logo=threedotjs&logoColor=white)
 ![Google AI Studio v1](https://img.shields.io/badge/Gemini-Interactions_API_v1-0F766E?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![MoGe-2 + YOLOE GPU](https://img.shields.io/badge/3D_Local-MoGe--2_%2B_YOLOE_GPU-1D4ED8?style=for-the-badge)
-![Pytest 51/51](https://img.shields.io/badge/Pytest-51%2F51_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
+![Pytest 53/53](https://img.shields.io/badge/Pytest-53%2F53_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
 ![SEED 42](https://img.shields.io/badge/Reproducibility-SEED_%3D_42-B45309?style=for-the-badge)
 [![Predecesor 2D](https://img.shields.io/badge/Evolución_de-C8286_Visión_2D-4B5563?style=for-the-badge&logo=github)](https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN)
 
@@ -150,7 +150,7 @@ flowchart LR
    $$\mathbf{b} = [x, y, z, \Delta x, \Delta y, \Delta z, r, p, \psi] \in \mathbb{R}^9$$
    con cuaternión intrínseco ZYX y matriz ortogonal de preservación quiral hacia Three.js $M = R_x(-90^\circ) \in SO(3)$ ($\det(M) = +1$):
    $$\mathbf{p}_{\text{three}} = \begin{pmatrix} x \\ z \\ -y \end{pmatrix}, \qquad R_{\text{three}} = M R_{\text{gem}} M^\top, \qquad \mathbf{s}_{\text{three}} = (\Delta x, \Delta z, \Delta y)$$
-2. **Motor Métrico Local GPU (`EXIF + MoGe-2 ViT-S + YOLOE-OV`):** extrae `FocalLengthIn35mmFilm` y transposición EXIF, infiere nube densa métrica $(X_{\text{cv}}, Y_{\text{cv}}, Z_{\text{cv}})$ en metros, mapa de normales locales y $\text{FOV}_h$ automático (`Ruicheng/moge-2-vits-normal`, `~1.3 GB` VRAM FP16), segmenta instancias abiertas (`yoloe-11s-seg.pt`), eleva máscaras a cuboides 9-DOF orientados y exporta nube de puntos 3D coloreada (`THREE.Points`, hasta 16,000 vértices) más mapa de profundidad mate (`#B45309` cerca $\to$ `#0F766E` $\to$ `#1E293B` lejos) con encuadre dinámico macro-a-habitación.
+2. **Motor Métrico Local GPU (`EXIF + MoGe-2 ViT-S + YOLOE-OV`):** extrae `FocalLengthIn35mmFilm` y transposición EXIF, infiere nube densa métrica $(X_{\text{cv}}, Y_{\text{cv}}, Z_{\text{cv}})$ en metros, mapa de normales locales y $\text{FOV}_h$ automático (`Ruicheng/moge-2-vits-normal`, `~1.3 GB` VRAM FP16), segmenta instancias abiertas (`yoloe-11s-seg.pt`), eleva máscaras a cuboides 9-DOF orientados y empaqueta hasta **`80,000` surfels 2DGS adaptativos** (72% del presupuesto concentrado en el cuerpo del objeto, con normales `Int8`, ID de instancia y relieve en `mm`), **malla superficial 2.5D con corte de discontinuidades** (`|\Delta \log d| < 0.06`), visor WebGL con modos `RGB` / `Normales` / `Relieve`, **aislamiento de cuerpo**, **cortador transversal (`Corte X/Y/Z`)**, exportación **`.PLY`** y mapa de profundidad mate (`#B45309` cerca $\to$ `#0F766E` $\to$ `#1E293B` lejos).
 3. **Proyección Pinhole y Campo Vertical:** $f = W / (2\tan(\text{FOV}_h/2))$, $\text{FOV}_v = 2\arctan(\tan(\text{FOV}_h/2)\cdot H/W)$.
 4. **Métricas Exactas, NDS y Omni3D:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$), matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera, puntaje estático **`nds_static`** (*nuScenes*) y desglose **Omni3D** por rangos de profundidad (`near_0_2m`, `mid_2_3.5m`, `far_3.5m_plus`).
 5. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
@@ -192,7 +192,7 @@ Levanta automáticamente FastAPI en **`http://127.0.0.1:8085`** y React/Vite en 
 # 1. Opcional: dependencias PyTorch CUDA + MoGe-2 + YOLOE para reconstrucción métrica local GPU
 uv pip install --python backend/.venv/bin/python -r backend/requirements-local-3d.txt
 
-# 2. Suite completa de 51 pruebas deterministas offline (geometría, metrología 3D clínica/industrial, API y compuerta)
+# 2. Suite completa de 53 pruebas deterministas offline (geometría, metrología 3D clínica/industrial, surfels 2DGS, API y compuerta)
 MYLEENTO3_LOCAL_3D_ENGINE=0 backend/.venv/bin/pytest -v
 
 # 2. Pruebas en vivo HTTP de los 3 modelos + 3 fotos diversas (requiere servidor en :8085)

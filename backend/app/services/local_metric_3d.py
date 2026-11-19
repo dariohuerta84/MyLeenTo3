@@ -318,14 +318,137 @@ def render_depth_map_png(
     return base64.b64encode(buf.getvalue()).decode("ascii"), stats
 
 
+def _compute_threejs_normals(
+    points_cv: np.ndarray,
+    normals_cv: Optional[np.ndarray],
+) -> np.ndarray:
+    """Compute or normalize surface normals and convert OpenCV (X,Y,Z) -> Three.js (X,-Y,-Z)."""
+    h, w = points_cv.shape[:2]
+    if normals_cv is not None and normals_cv.shape[:2] == (h, w) and normals_cv.ndim == 3 and normals_cv.shape[2] == 3:
+        n_cv = np.nan_to_num(normals_cv.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        norms = np.linalg.norm(n_cv, axis=-1, keepdims=True)
+        valid_n = norms[..., 0] > 1e-6
+        unit_cv = np.divide(n_cv, np.maximum(norms, 1e-6))
+        unit_cv = np.where(valid_n[..., None], unit_cv, np.array([0.0, 0.0, -1.0], dtype=np.float32))
+    elif h >= 3 and w >= 3:
+        dp_du = points_cv[1:-1, 2:] - points_cv[1:-1, :-2]
+        dp_dv = points_cv[2:, 1:-1] - points_cv[:-2, 1:-1]
+        raw_n = np.cross(dp_dv, dp_du).astype(np.float32)
+        view_dot = np.sum(raw_n * (-points_cv[1:-1, 1:-1]), axis=-1, keepdims=True)
+        raw_n = np.where(view_dot < 0.0, -raw_n, raw_n)
+        padded = np.pad(raw_n, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        padded = np.nan_to_num(padded, nan=0.0, posinf=0.0, neginf=0.0)
+        norms = np.linalg.norm(padded, axis=-1, keepdims=True)
+        valid_n = norms[..., 0] > 1e-7
+        unit_cv = np.divide(padded, np.maximum(norms, 1e-7))
+        unit_cv = np.where(valid_n[..., None], unit_cv, np.array([0.0, 0.0, -1.0], dtype=np.float32))
+    else:
+        unit_cv = np.zeros((h, w, 3), dtype=np.float32)
+        unit_cv[..., 2] = -1.0
+
+    n_three = np.empty_like(unit_cv, dtype=np.float32)
+    n_three[..., 0] = unit_cv[..., 0]
+    n_three[..., 1] = -unit_cv[..., 1]
+    n_three[..., 2] = -unit_cv[..., 2]
+    return n_three
+
+
+def build_surface_mesh_threejs(
+    points_cv: np.ndarray,
+    rgb_uint8: np.ndarray,
+    valid_mask: np.ndarray,
+    normals_three: np.ndarray,
+    *,
+    target_width: int = 168,
+    max_rel_depth_jump: float = 0.06,
+) -> Optional[dict[str, Any]]:
+    """Triangulate dense depth grid while cutting flying-pixel bridges across depth discontinuities."""
+    h, w = points_cv.shape[:2]
+    if h < 4 or w < 4:
+        return None
+
+    step = max(1, int(round(float(w) / float(max(target_width, 16)))))
+    pts_sub = points_cv[::step, ::step]
+    rgb_sub = rgb_uint8[::step, ::step]
+    val_sub = valid_mask[::step, ::step]
+    nrm_sub = normals_three[::step, ::step]
+
+    gh, gw = pts_sub.shape[:2]
+    if gh < 2 or gw < 2:
+        return None
+
+    z_sub = pts_sub[..., 2]
+    v_ok = (
+        val_sub
+        & np.isfinite(pts_sub).all(axis=-1)
+        & np.isfinite(z_sub)
+        & (z_sub > 0.04)
+        & (z_sub < 35.0)
+    )
+    pts_three_grid = opencv_to_threejs_points(pts_sub)
+
+    grid_idx = np.arange(gh * gw, dtype=np.uint32).reshape(gh, gw)
+    tl = grid_idx[:-1, :-1].ravel()
+    tr = grid_idx[:-1, 1:].ravel()
+    bl = grid_idx[1:, :-1].ravel()
+    br = grid_idx[1:, 1:].ravel()
+
+    tri_a = np.stack([tl, bl, tr], axis=1)
+    tri_b = np.stack([tr, bl, br], axis=1)
+    all_tris = np.concatenate([tri_a, tri_b], axis=0)
+
+    v_flat = v_ok.ravel()
+    z_flat = z_sub.ravel()
+    safe_z = np.where(v_flat & (z_flat > 0.01), z_flat, 1.0)
+    log_z = np.log(safe_z)
+
+    i0, i1, i2 = all_tris[:, 0], all_tris[:, 1], all_tris[:, 2]
+    ok_tri = v_flat[i0] & v_flat[i1] & v_flat[i2]
+    ok_tri &= (
+        (np.abs(log_z[i0] - log_z[i1]) < max_rel_depth_jump)
+        & (np.abs(log_z[i1] - log_z[i2]) < max_rel_depth_jump)
+        & (np.abs(log_z[i0] - log_z[i2]) < max_rel_depth_jump)
+    )
+
+    kept_tris = all_tris[ok_tri]
+    if kept_tris.shape[0] == 0:
+        return None
+
+    used_verts, inverse = np.unique(kept_tris, return_inverse=True)
+    compact_tris = np.ascontiguousarray(inverse.reshape(-1, 3), dtype=np.uint32)
+
+    verts_flat = pts_three_grid.reshape(-1, 3)[used_verts]
+    pos_f32 = np.ascontiguousarray(np.nan_to_num(verts_flat, nan=0.0, posinf=0.0, neginf=0.0), dtype=np.float32)
+    col_u8 = np.ascontiguousarray(rgb_sub.reshape(-1, 3)[used_verts], dtype=np.uint8)
+    nrm_flat = np.nan_to_num(nrm_sub.reshape(-1, 3)[used_verts], nan=0.0, posinf=0.0, neginf=0.0)
+    nrm_i8 = np.ascontiguousarray(np.clip(np.round(nrm_flat * 127.0), -127, 127).astype(np.int8))
+
+    return {
+        "vertex_count": int(pos_f32.shape[0]),
+        "triangle_count": int(compact_tris.shape[0]),
+        "positions_b64": base64.b64encode(pos_f32.tobytes()).decode("ascii"),
+        "colors_b64": base64.b64encode(col_u8.tobytes()).decode("ascii"),
+        "normals_b64": base64.b64encode(nrm_i8.tobytes()).decode("ascii"),
+        "indices_b64": base64.b64encode(compact_tris.tobytes()).decode("ascii"),
+    }
+
+
 def pack_point_cloud_threejs(
     points_cv: np.ndarray,
     rgb_uint8: np.ndarray,
     valid_mask: np.ndarray,
     max_points: int = 16000,
+    *,
+    normals_cv: Optional[np.ndarray] = None,
+    instance_masks: Optional[list[np.ndarray]] = None,
+    object_ids: Optional[list[str]] = None,
+    ransac_plane: Optional[dict[str, Any]] = None,
+    include_surface_mesh: bool = False,
 ) -> dict[str, Any]:
-    """Subsample valid metric points into compact float32/uint8 base64 buffers in Three.js coordinates."""
+    """Subsample valid metric points (with body-focused sampling, normals, object IDs, relief & optional mesh) into compact Three.js buffers."""
+    h, w = points_cv.shape[:2]
     pts_three = opencv_to_threejs_points(points_cv)
+    normals_three = _compute_threejs_normals(points_cv, normals_cv)
     z_cv = points_cv[..., 2]
     keep = (
         valid_mask
@@ -334,9 +457,25 @@ def pack_point_cloud_threejs(
         & (z_cv > 0.04)
         & (z_cv < 35.0)
     )
+
+    label_map = np.zeros((h, w), dtype=np.uint8)
+    if instance_masks:
+        for idx_inst, raw_m in enumerate(instance_masks[:250]):
+            if raw_m.shape[:2] != (h, w):
+                pil_m = Image.fromarray((raw_m > 0).astype(np.uint8) * 255, mode="L").resize(
+                    (w, h), Image.Resampling.NEAREST
+                )
+                m_bool = np.asarray(pil_m) > 127
+            else:
+                m_bool = raw_m > 0
+            assign_mask = m_bool & (label_map == 0)
+            label_map[assign_mask] = np.uint8(idx_inst + 1)
+
     flat_pts = pts_three[keep]
     flat_rgb = rgb_uint8[keep]
     flat_z = z_cv[keep]
+    flat_n = normals_three[keep]
+    flat_lbl = label_map[keep]
 
     total = int(flat_pts.shape[0])
     if total == 0:
@@ -344,27 +483,88 @@ def pack_point_cloud_threejs(
             "count": 0,
             "positions_b64": "",
             "colors_b64": "",
+            "normals_b64": "",
+            "object_indices_b64": "",
+            "relief_cm_b64": "",
+            "object_id_palette": list(object_ids or []),
+            "has_normals": False,
+            "body_point_count": 0,
+            "max_relief_mm": 0.0,
             "median_depth_m": 0.0,
             "bounds_three": {"min": [0.0, 0.0, 0.0], "max": [0.0, 0.0, 0.0]},
+            "surface_mesh": None,
         }
 
+    # Compute per-pixel relief elevation (meters) above dominant RANSAC plane or p95 backdrop
+    if ransac_plane is not None and ransac_plane.get("detected") and ransac_plane.get("plane_normal_gemini"):
+        pts_cv_k = points_cv[keep]
+        pts_gem_k = np.column_stack([pts_cv_k[:, 0], pts_cv_k[:, 2], -pts_cv_k[:, 1]]).astype(np.float64)
+        n_pl = np.array(ransac_plane["plane_normal_gemini"], dtype=np.float64)
+        n_pl /= max(float(np.linalg.norm(n_pl)), 1e-9)
+        d_pl = float(
+            ransac_plane.get(
+                "plane_d_gemini",
+                -float(n_pl[2]) * float(ransac_plane.get("plane_height_z_m", 0.0)),
+            )
+        )
+        cam_sign = 1.0 if d_pl >= 0.0 else -1.0
+        flat_relief = np.maximum(cam_sign * (pts_gem_k @ n_pl + d_pl), 0.0).astype(np.float32)
+    else:
+        p95_z = float(np.percentile(flat_z, 95))
+        flat_relief = np.maximum(p95_z - flat_z, 0.0).astype(np.float32)
+
     if total > max_points:
-        indices = np.linspace(0, total - 1, max_points, dtype=np.int64)
+        fg_pos = np.where(flat_lbl > 0)[0]
+        bg_pos = np.where(flat_lbl == 0)[0]
+        if fg_pos.size > 0:
+            fg_target = min(int(fg_pos.size), int(round(max_points * 0.72)))
+            bg_target = min(int(bg_pos.size), max_points - fg_target)
+            rem = max_points - fg_target - bg_target
+            if rem > 0 and fg_pos.size > fg_target:
+                fg_target = min(int(fg_pos.size), fg_target + rem)
+            fg_sel = fg_pos[np.linspace(0, fg_pos.size - 1, fg_target, dtype=np.int64)] if fg_target > 0 else np.empty(0, dtype=np.int64)
+            bg_sel = bg_pos[np.linspace(0, bg_pos.size - 1, bg_target, dtype=np.int64)] if bg_target > 0 else np.empty(0, dtype=np.int64)
+            indices = np.sort(np.concatenate([fg_sel, bg_sel]))
+        else:
+            indices = np.linspace(0, total - 1, max_points, dtype=np.int64)
+
         flat_pts = flat_pts[indices]
         flat_rgb = flat_rgb[indices]
         flat_z = flat_z[indices]
+        flat_n = flat_n[indices]
+        flat_lbl = flat_lbl[indices]
+        flat_relief = flat_relief[indices]
 
     pts_f32 = np.ascontiguousarray(flat_pts, dtype=np.float32)
     cols_u8 = np.ascontiguousarray(flat_rgb, dtype=np.uint8)
+    nrm_i8 = np.ascontiguousarray(np.clip(np.round(flat_n * 127.0), -127, 127).astype(np.int8))
+    lbl_u8 = np.ascontiguousarray(flat_lbl, dtype=np.uint8)
+    relief_mm_u16 = np.ascontiguousarray(np.clip(np.round(flat_relief * 1000.0), 0, 65535).astype(np.uint16))
+
     b_min = [round(float(v), 3) for v in np.min(pts_f32, axis=0)]
     b_max = [round(float(v), 3) for v in np.max(pts_f32, axis=0)]
+    max_relief_mm = round(float(np.percentile(relief_mm_u16, 98)), 1) if relief_mm_u16.size > 0 else 0.0
+
+    surface_mesh = (
+        build_surface_mesh_threejs(points_cv, rgb_uint8, valid_mask, normals_three)
+        if include_surface_mesh
+        else None
+    )
 
     return {
         "count": int(pts_f32.shape[0]),
         "positions_b64": base64.b64encode(pts_f32.tobytes()).decode("ascii"),
         "colors_b64": base64.b64encode(cols_u8.tobytes()).decode("ascii"),
+        "normals_b64": base64.b64encode(nrm_i8.tobytes()).decode("ascii"),
+        "object_indices_b64": base64.b64encode(lbl_u8.tobytes()).decode("ascii"),
+        "relief_cm_b64": base64.b64encode(relief_mm_u16.tobytes()).decode("ascii"),
+        "object_id_palette": list(object_ids or []),
+        "has_normals": True,
+        "body_point_count": int(np.sum(lbl_u8 > 0)),
+        "max_relief_mm": max_relief_mm,
         "median_depth_m": round(float(np.median(flat_z)), 3),
         "bounds_three": {"min": b_min, "max": b_max},
+        "surface_mesh": surface_mesh,
     }
 
 
@@ -742,9 +942,6 @@ def extract_depth_and_point_cloud(
         fov_source = "moge2_intrinsics"
 
     depth_b64, depth_stats = render_depth_map_png(moge_out["depth_m"], moge_out["valid_mask"])
-    point_cloud = pack_point_cloud_threejs(
-        moge_out["points_cv"], moge_out["rgb_u8"], moge_out["valid_mask"]
-    )
     real_metrics = compute_real_photo_3d_metrics(
         points_cv=moge_out["points_cv"],
         depth_m=moge_out["depth_m"],
@@ -757,6 +954,15 @@ def extract_depth_and_point_cloud(
         width=w,
         height=h,
         per_object_metrology=[],
+    )
+    point_cloud = pack_point_cloud_threejs(
+        moge_out["points_cv"],
+        moge_out["rgb_u8"],
+        moge_out["valid_mask"],
+        max_points=60000,
+        normals_cv=moge_out.get("normals_cv"),
+        ransac_plane=real_metrics.get("ransac_plane"),
+        include_surface_mesh=True,
     )
     return {
         "width": w,
@@ -945,7 +1151,15 @@ def run_local_metric_3d(
 
     depth_b64, depth_stats = render_depth_map_png(moge_out["depth_m"], moge_out["valid_mask"])
     point_cloud = pack_point_cloud_threejs(
-        moge_out["points_cv"], rgb_u8, moge_out["valid_mask"]
+        moge_out["points_cv"],
+        rgb_u8,
+        moge_out["valid_mask"],
+        max_points=80000,
+        normals_cv=moge_out.get("normals_cv"),
+        instance_masks=kept_masks_proc,
+        object_ids=[str(o["id"]) for o in lifted_objects],
+        ransac_plane=ransac_plane,
+        include_surface_mesh=True,
     )
     real_metrics = compute_real_photo_3d_metrics(
         points_cv=moge_out["points_cv"],

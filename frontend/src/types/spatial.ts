@@ -224,15 +224,32 @@ export interface DepthStats {
   max_m: number;
 }
 
+export interface SurfaceMeshData {
+  vertex_count: number;
+  triangle_count: number;
+  positions_b64: string;
+  colors_b64: string;
+  normals_b64: string;
+  indices_b64: string;
+}
+
 export interface PointCloudData {
   count: number;
   positions_b64: string;
   colors_b64: string;
+  normals_b64?: string;
+  object_indices_b64?: string;
+  relief_cm_b64?: string;
+  object_id_palette?: string[];
+  has_normals?: boolean;
+  body_point_count?: number;
+  max_relief_mm?: number;
   median_depth_m: number;
   bounds_three?: {
     min: [number, number, number];
     max: [number, number, number];
   };
+  surface_mesh?: SurfaceMeshData | null;
 }
 
 export interface PerObjectPointCloudMetrology {
