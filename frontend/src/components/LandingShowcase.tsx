@@ -637,10 +637,10 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 <ArrowRight className="h-4 w-4" />
               </button>
               <a
-                href="#scrolly-3d-story"
+                href="#problematica-scroll"
                 className="inline-flex items-center gap-2 rounded-lg border border-[#E2E5EA] bg-[#FFFFFF] px-4 py-2.5 text-sm font-medium text-[#111827] transition-colors hover:bg-[#F0F2F5]"
               >
-                <span>Recorrido 3D Interactivo</span>
+                <span>Explorar Problemática</span>
                 <ArrowDown className="h-4 w-4 text-[#4B5563]" />
               </a>
               <button
@@ -737,10 +737,10 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
               </div>
             </div>
 
-            {/* Staggered floating parallax telemetry card (matte, zero neon) */}
+            {/* Staggered floating parallax telemetry card (matte, zero neon, zero overlap) */}
             <div
-              className="parallax-layer pointer-events-none mt-3 hidden rounded-lg border border-[#E2E5EA] bg-[#FFFFFF] px-3.5 py-2.5 sm:inline-flex items-center gap-4 lg:absolute lg:-bottom-4 lg:right-4"
-              style={{ '--parallax-y': '-34px' } as React.CSSProperties}
+              className="parallax-layer pointer-events-none mt-3 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] px-4 py-2.5"
+              style={{ '--parallax-y': '-18px' } as React.CSSProperties}
             >
               <div>
                 <div className="text-[10px] font-medium uppercase tracking-wide text-[#4B5563]">
@@ -759,11 +759,266 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </div>
       </section>
 
+      {/* Alternating Left/Right Problematica Principal Scroll Choreography */}
+      <section
+        id="problematica-scroll"
+        aria-label="Problemática principal antes de usar modelos 3D"
+        className="problem-scroll-section border-t border-[#E2E5EA] bg-[#FFFFFF] py-16 sm:py-20"
+      >
+        <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
+          <div className="mx-auto max-w-3xl text-center">
+            <span className="font-mono-tech inline-flex items-center gap-2 rounded-full border border-[#E2E5EA] bg-[#F7F7F5] px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-[#1D4ED8]">
+              00 · La Problemática Principal (De C8286 2D a 3D Real)
+            </span>
+            <h2 className="font-serif-editorial mt-3 text-3xl leading-[1.08] text-[#111827] sm:text-4xl lg:text-[2.75rem]">
+              Cuatro brechas que rompen la visión 2D y los modelos 3D sin control
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-[#4B5563]">
+              Antes de abrir el Laboratorio 3D, observa por qué no basta con detectar cajas o llamar ciegamente a una IA sobre una foto común: cada fila opone el problema real (izquierda/derecha) frente a su evidencia geométrica verificada.
+            </p>
+          </div>
+
+          {/* Alternating Left <-> Center Optical Rail <-> Right Rows */}
+          <div className="relative mt-12 space-y-10 lg:space-y-14">
+            {/* Continuous vertical optical track (desktop center axis) */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-4 left-1/2 hidden w-[2px] -translate-x-1/2 bg-[#E2E5EA] lg:block"
+            >
+              <div className="problem-rail-fill h-full w-full bg-[#1D4ED8]" />
+            </div>
+
+            {/* ROW 01: Text Left / Visual Diagram Right */}
+            <div className="grid items-center gap-6 lg:grid-cols-[1fr_56px_1fr] lg:gap-4">
+              <article className="scroll-enter-left rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono-tech rounded bg-[#BE123C]/10 px-2 py-0.5 text-[11px] font-semibold text-[#BE123C]">
+                    BRECHA 01 · VISIÓN 2D PLANA
+                  </span>
+                  <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                    Herencia C8286
+                  </span>
+                </div>
+                <h3 className="mt-3 text-lg font-semibold text-[#111827]">
+                  Ceguera de profundidad y colapso bajo oclusión parcial
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-[#4B5563]">
+                  En imágenes planas, un clasificador tradicional ni siquiera distingue si un obstáculo está a <strong className="text-[#111827]">1.4 m</strong> o a <strong className="text-[#111827]">4.8 m</strong>. Cuando otro objeto lo tapa parcialmente, los descriptores clásicos HSV/LBP/HOG colapsan (<span className="font-mono-tech text-[#111827]">F1 &le; 0.104</span>) y hasta <span className="font-mono-tech text-[#111827]">MobileNetV2 INT8</span> baja a <span className="font-mono-tech text-[#111827]">F1 = 0.715</span>.
+                </p>
+                <div className="font-mono-tech mt-4 flex flex-wrap items-center gap-3 border-t border-[#E2E5EA] pt-3 text-[11px]">
+                  <span className="text-[#0F766E]">✓ Respuesta MyLeenTo3: Ray-Tracing Kay-Kajiya (hasta 89% oclusión medida)</span>
+                </div>
+              </article>
+
+              <div className="hidden justify-center lg:flex">
+                <div className="scroll-axis-node font-mono-tech z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#1D4ED8] bg-[#FFFFFF] text-xs font-bold text-[#1D4ED8]">
+                  01
+                </div>
+              </div>
+
+              <div className="scroll-enter-right rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-4">
+                <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha 01: oclusión 2D vs rayos 3D">
+                  <rect x="4" y="4" width="212" height="182" rx="8" fill="#F7F7F5" stroke="#E2E5EA" />
+                  <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#4B5563">FOTO 2D SIN PROFUNDIDAD</text>
+                  <rect x="34" y="46" width="118" height="106" rx="4" fill="#FFFFFF" stroke="#9CA3AF" strokeDasharray="4 3" strokeWidth="1.5" />
+                  <rect x="86" y="72" width="102" height="90" rx="4" fill="#E5E7EB" stroke="#4B5563" strokeWidth="1.5" />
+                  <text x="137" y="121" textAnchor="middle" fontFamily="Inter, sans-serif" fontSize="11" fontWeight="600" fill="#111827">Frente ? m</text>
+                  <text x="110" y="173" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9.5" fill="#BE123C">Clásico C8286: F1 = 0.104</text>
+
+                  <path d="M222 95 L238 95" stroke="#1D4ED8" strokeWidth="2" />
+                  <polygon points="236,90 245,95 236,100" fill="#1D4ED8" />
+
+                  <rect x="248" y="4" width="208" height="182" rx="8" fill="#F0FDFA" stroke="#99F6E4" />
+                  <text x="260" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#0F766E">RAYOS 3D KAY-KAJIYA</text>
+                  <circle cx="272" cy="146" r="6" fill="#111827" />
+                  <text x="272" y="162" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8.5" fill="#111827">Cam</text>
+                  <line x1="276" y1="142" x2="345" y2="96" stroke="#1D4ED8" strokeWidth="1.6" />
+                  <line x1="276" y1="142" x2="412" y2="62" stroke="#BE123C" strokeWidth="1.4" strokeDasharray="4 3" />
+                  <line x1="276" y1="142" x2="412" y2="118" stroke="#0F766E" strokeWidth="1.4" />
+                  <rect x="330" y="78" width="38" height="54" rx="3" fill="#1D4ED8" fillOpacity="0.18" stroke="#1D4ED8" strokeWidth="1.6" />
+                  <rect x="394" y="44" width="46" height="80" rx="3" fill="#0F766E" fillOpacity="0.16" stroke="#0F766E" strokeWidth="1.6" />
+                  <text x="352" y="173" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9.5" fontWeight="700" fill="#0F766E">Oclusión medida: 89% · Δy=1.8m</text>
+                </svg>
+              </div>
+            </div>
+
+            {/* ROW 02: Visual Diagram Left / Text Right */}
+            <div className="grid items-center gap-6 lg:grid-cols-[1fr_56px_1fr] lg:gap-4">
+              <div className="scroll-enter-left order-2 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-4 lg:order-1">
+                <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha 02: LiDAR vs VLM vs Compuerta Edge">
+                  <rect x="4" y="4" width="452" height="182" rx="8" fill="#F7F7F5" stroke="#E2E5EA" />
+                  <text x="20" y="25" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#111827">COSTO DE INFERENCIA Y DECISIÓN ADAPTATIVA</text>
+
+                  <text x="20" y="54" fontFamily="Inter, sans-serif" fontSize="11" fontWeight="600" fill="#111827">100% Gemini 4 Hydrogen (Sin Compuerta)</text>
+                  <rect x="20" y="61" width="276" height="16" rx="4" fill="#BE123C" fillOpacity="0.85" />
+                  <text x="304" y="73" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#BE123C">1,420 ms · costo alto</text>
+
+                  <text x="20" y="101" fontFamily="Inter, sans-serif" fontSize="11" fontWeight="600" fill="#111827">Compuerta Edge → Argon (Escena clean)</text>
+                  <rect x="20" y="108" width="154" height="16" rx="4" fill="#1D4ED8" />
+                  <text x="182" y="120" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#1D4ED8">780 ms · −45% latencia</text>
+
+                  <text x="20" y="148" fontFamily="Inter, sans-serif" fontSize="11" fontWeight="600" fill="#111827">Compuerta Edge → Flash-Lite (Simple)</text>
+                  <rect x="20" y="155" width="76" height="16" rx="4" fill="#0F766E" />
+                  <text x="104" y="167" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#0F766E">310 ms · −72% latencia</text>
+                </svg>
+              </div>
+
+              <div className="order-1 hidden justify-center lg:order-2 lg:flex">
+                <div className="scroll-axis-node font-mono-tech z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#0F766E] bg-[#FFFFFF] text-xs font-bold text-[#0F766E]">
+                  02
+                </div>
+              </div>
+
+              <article className="scroll-enter-right order-1 rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6 lg:order-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono-tech rounded bg-[#B45309]/10 px-2 py-0.5 text-[11px] font-semibold text-[#B45309]">
+                    BRECHA 02 · COSTO Y ESCALAMIENTO
+                  </span>
+                  <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                    Sin LiDAR
+                  </span>
+                </div>
+                <h3 className="mt-3 text-lg font-semibold text-[#111827]">
+                  El dilema entre LiDAR caro y llamar a modelos pesados en cada foto
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-[#4B5563]">
+                  Escáneres 3D dedicados encarecen el despliegue, pero usar modelos VLM con razonamiento máximo en el 100% de cuadros desperdicia latencia y cuota. Al igual que la cascada <span className="font-mono-tech text-[#111827]">64→224 px</span> de <span className="font-mono-tech text-[#111827]">C8286</span> (que ahorró <strong className="text-[#111827]">97.5%</strong> de ancho de banda), la compuerta de MyLeenTo3 distingue cuándo basta un tier veloz (<span className="font-mono-tech text-[#111827]">APROBADO</span>) y cuándo es indispensable escalar (<span className="font-mono-tech text-[#111827]">ESCALAR_MODELO</span>).
+                </p>
+                <div className="font-mono-tech mt-4 flex flex-wrap items-center gap-3 border-t border-[#E2E5EA] pt-3 text-[11px]">
+                  <span className="text-[#0F766E]">✓ Respuesta MyLeenTo3: Compuerta Edge → VLM (−45% / −72% latencia en clean)</span>
+                </div>
+              </article>
+            </div>
+
+            {/* ROW 03: Text Left / Visual Diagram Right */}
+            <div className="grid items-center gap-6 lg:grid-cols-[1fr_56px_1fr] lg:gap-4">
+              <article className="scroll-enter-left rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono-tech rounded bg-[#BE123C]/10 px-2 py-0.5 text-[11px] font-semibold text-[#BE123C]">
+                    BRECHA 03 · FÍSICA IMPOSIBLE
+                  </span>
+                  <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                    Sin Ground Truth
+                  </span>
+                </div>
+                <h3 className="mt-3 text-lg font-semibold text-[#111827]">
+                  Alucinaciones físicas silenciosas: objetos que flotan o se atraviesan
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-[#4B5563]">
+                  Un modelo generativo o VLM sin restricciones físicas puede ubicar un mueble flotando 50 cm sobre el piso (<span className="font-mono-tech text-[#111827]">GFI</span>), hacer que dos sólidos compartan el mismo volumen 3D (<span className="font-mono-tech text-[#111827]">PVI SAT</span>) o inflar objetos lejanos en zonas oscuras (<span className="font-mono-tech text-[#111827]">±σ_y ∝ y²</span>).
+                </p>
+                <div className="font-mono-tech mt-4 flex flex-wrap items-center gap-3 border-t border-[#E2E5EA] pt-3 text-[11px]">
+                  <span className="text-[#0F766E]">✓ Respuesta MyLeenTo3: PECS Sobel + SAT 15-ejes + bloqueo RECHAZADO_FISICA</span>
+                </div>
+              </article>
+
+              <div className="hidden justify-center lg:flex">
+                <div className="scroll-axis-node font-mono-tech z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#BE123C] bg-[#FFFFFF] text-xs font-bold text-[#BE123C]">
+                  03
+                </div>
+              </div>
+
+              <div className="scroll-enter-right rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-4">
+                <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha 03: anomalías físicas PVI y GFI">
+                  <rect x="4" y="4" width="218" height="182" rx="8" fill="#F7F7F5" stroke="#E2E5EA" />
+                  <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#BE123C">COLISIÓN SÓLIDA SAT (PVI)</text>
+                  <rect x="42" y="64" width="84" height="72" rx="3" fill="#1D4ED8" fillOpacity="0.16" stroke="#1D4ED8" strokeWidth="1.8" />
+                  <rect x="94" y="80" width="88" height="68" rx="3" fill="#BE123C" fillOpacity="0.16" stroke="#BE123C" strokeWidth="1.8" />
+                  <rect x="94" y="80" width="32" height="56" fill="#BE123C" fillOpacity="0.32" stroke="#BE123C" strokeDasharray="3 2" />
+                  <text x="113" y="168" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9.5" fontWeight="700" fill="#BE123C">PVI ≥ 8.0% → Solapamiento</text>
+
+                  <rect x="234" y="4" width="222" height="182" rx="8" fill="#F7F7F5" stroke="#E2E5EA" />
+                  <text x="246" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#B45309">LEVITACIÓN GRAVITATORIA (GFI)</text>
+                  <line x1="252" y1="146" x2="438" y2="146" stroke="#4B5563" strokeWidth="2" />
+                  <text x="256" y="161" fontFamily="JetBrains Mono, monospace" fontSize="8.5" fill="#4B5563">Plano soporte latente Z</text>
+                  <rect x="296" y="54" width="96" height="54" rx="3" fill="#B45309" fillOpacity="0.14" stroke="#B45309" strokeWidth="1.8" />
+                  <line x1="344" y1="108" x2="344" y2="146" stroke="#BE123C" strokeWidth="1.6" strokeDasharray="3 2" />
+                  <text x="352" y="131" fontFamily="JetBrains Mono, monospace" fontSize="9.5" fontWeight="700" fill="#BE123C">+0.58 m</text>
+                  <rect x="334" y="168" width="112" height="14" rx="3" fill="#BE123C" />
+                  <text x="390" y="178" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8" fontWeight="700" fill="#FFFFFF">RECHAZADO_FISICA</text>
+                </svg>
+              </div>
+            </div>
+
+            {/* ROW 04: Visual Diagram Left / Text Right */}
+            <div className="grid items-center gap-6 lg:grid-cols-[1fr_56px_1fr] lg:gap-4">
+              <div className="scroll-enter-left order-2 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-4 lg:order-1">
+                <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha 04: sensibilidad FOV y deriva temporal">
+                  <rect x="4" y="4" width="222" height="182" rx="8" fill="#F7F7F5" stroke="#E2E5EA" />
+                  <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#1D4ED8">DESCALIBRADO FOV_h (PINHOLE)</text>
+                  <line x1="26" y1="142" x2="206" y2="142" stroke="#CBD5E1" strokeWidth="1.2" />
+                  <line x1="26" y1="48" x2="26" y2="142" stroke="#CBD5E1" strokeWidth="1.2" />
+                  <polyline fill="none" stroke="#1D4ED8" strokeWidth="2.2" points="28,124 62,92 94,58 134,98 172,126 202,138" />
+                  <circle cx="94" cy="58" r="4.5" fill="#0F766E" />
+                  <text x="102" y="54" fontFamily="JetBrains Mono, monospace" fontSize="9.5" fontWeight="700" fill="#0F766E">60°: 80.7%</text>
+                  <text x="148" y="114" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#BE123C">100°: 2.6%</text>
+                  <text x="115" y="168" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#4B5563">Ajuste en vivo &lt; 10 ms / 0 tokens</text>
+
+                  <rect x="236" y="4" width="220" height="182" rx="8" fill="#F7F7F5" stroke="#E2E5EA" />
+                  <text x="248" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#0F766E">DERIVA VIDEO (WORLD MODELS)</text>
+                  <rect x="256" y="56" width="38" height="44" rx="3" fill="#FFFFFF" stroke="#1D4ED8" strokeWidth="1.6" />
+                  <rect x="314" y="48" width="54" height="58" rx="3" fill="#FFFFFF" stroke="#B45309" strokeWidth="1.6" />
+                  <rect x="384" y="64" width="32" height="36" rx="3" fill="#FFFFFF" stroke="#BE123C" strokeWidth="1.6" />
+                  <text x="275" y="118" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8.5" fill="#4B5563">t0</text>
+                  <text x="341" y="118" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8.5" fill="#B45309">t1 (+17%)</text>
+                  <text x="400" y="118" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8.5" fill="#BE123C">t2 (jitter)</text>
+                  <text x="346" y="168" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9.5" fontWeight="700" fill="#0F766E">Estabilidad medida: 58.5 / 100</text>
+                </svg>
+              </div>
+
+              <div className="order-1 hidden justify-center lg:order-2 lg:flex">
+                <div className="scroll-axis-node font-mono-tech z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#B45309] bg-[#FFFFFF] text-xs font-bold text-[#B45309]">
+                  04
+                </div>
+              </div>
+
+              <article className="scroll-enter-right order-1 rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6 lg:order-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono-tech rounded bg-[#1D4ED8]/10 px-2 py-0.5 text-[11px] font-semibold text-[#1D4ED8]">
+                    BRECHA 04 · ÓPTICA Y TEMPORALIDAD
+                  </span>
+                  <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                    Genie / Veo Gap
+                  </span>
+                </div>
+                <h3 className="mt-3 text-lg font-semibold text-[#111827]">
+                  Descalibrado de lente (<span className="font-mono-tech">FOV_h</span>) y deriva en secuencias de video
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-[#4B5563]">
+                  Un error en el ángulo de cámara derrumba el calce 2D↔3D de <strong className="text-[#111827]">80.7%</strong> (en <span className="font-mono-tech text-[#111827]">60°</span>) hasta <strong className="text-[#111827]">2.6%</strong> (en <span className="font-mono-tech text-[#111827]">100°</span>). Además, los modelos de video tipo <em>World Model</em> inflan o rotan objetos cuadro a cuadro (<strong className="text-[#111827]">17.0%</strong> deriva medida en <em>transport crate</em>) sin entregar métricas explícitas.
+                </p>
+                <div className="font-mono-tech mt-4 flex flex-wrap items-center gap-3 border-t border-[#E2E5EA] pt-3 text-[11px]">
+                  <span className="text-[#0F766E]">✓ Respuesta MyLeenTo3: Slider FOV en vivo + Auditoría Multi-Frame y 7 funciones</span>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div className="mt-12 flex flex-wrap items-center justify-center gap-3">
+            <a
+              href="#scrolly-3d-story"
+              className="inline-flex items-center gap-2 rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] px-4 py-2.5 text-xs font-medium text-[#111827] transition-colors hover:bg-[#F0F2F5]"
+            >
+              <span>Ver Pipeline 3D paso a paso</span>
+              <ArrowDown className="h-3.5 w-3.5 text-[#4B5563]" />
+            </a>
+            <button
+              type="button"
+              onClick={() => onOpenLab(featured?.id)}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#1D4ED8] px-5 py-2.5 text-xs font-medium text-white transition-colors hover:bg-[#1E40AF]"
+            >
+              <span>Ir directo al Laboratorio 3D</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* Scroll-Driven 3D Scrollytelling Section (3d-scroll-web + scrollytelling) */}
       <section
         id="scrolly-3d-story"
         ref={storyRef}
-        className="scrolly-narrative-scope border-t border-[#E2E5EA] bg-[#FFFFFF] py-14"
+        className="scrolly-narrative-scope border-t border-[#E2E5EA] bg-[#F7F7F5] py-14"
       >
         <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#E2E5EA] pb-6">
@@ -790,7 +1045,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                     className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                       isAct
                         ? 'border-[#111827] bg-[#111827] text-white'
-                        : 'border-[#E2E5EA] bg-[#F7F7F5] text-[#4B5563] hover:text-[#111827]'
+                        : 'border-[#E2E5EA] bg-[#FFFFFF] text-[#4B5563] hover:text-[#111827]'
                     }`}
                   >
                     <span className="font-mono-tech mr-1 opacity-75">{ch.step}</span>
@@ -820,7 +1075,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       className={`scrolly-card-inner cursor-pointer rounded-xl border p-5 transition-colors ${
                         isAct
                           ? 'border-[#1D4ED8] bg-[#FFFFFF]'
-                          : 'border-[#E2E5EA] bg-[#F7F7F5] hover:border-[#CBD5E1]'
+                          : 'border-[#E2E5EA] bg-[#FFFFFF]/85 hover:border-[#CBD5E1]'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -919,7 +1174,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
       </section>
 
       {/* Horizontal Capabilities Strip with Registered @property Edge Mask Fade */}
-      <section className="reveal-on-scroll border-t border-[#E2E5EA] bg-[#F7F7F5] py-12">
+      <section className="reveal-on-scroll border-t border-[#E2E5EA] bg-[#FFFFFF] py-12">
         <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -944,7 +1199,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
             {LATENT_CAPABILITIES.map((cap) => (
               <div
                 key={cap.badge}
-                className="w-[240px] shrink-0 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-4"
+                className="w-[240px] shrink-0 rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-4"
               >
                 <span
                   className="font-mono-tech inline-block rounded px-2 py-0.5 text-[10px] font-semibold"
@@ -961,10 +1216,10 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
       </section>
 
       {/* Editorial Section: Mathematical Rigor Pillars */}
-      <section className="reveal-on-scroll border-t border-[#E2E5EA] bg-[#FFFFFF] py-14">
+      <section className="reveal-on-scroll border-t border-[#E2E5EA] bg-[#F7F7F5] py-14">
         <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
           <div className="grid gap-6 md:grid-cols-3">
-            <article className="scroll-card-lifecycle rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+            <article className="scroll-card-lifecycle rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-6">
               <div className="flex items-center gap-2 text-[#1D4ED8]">
                 <Layers className="h-4 w-4" />
                 <h3 className="text-sm font-semibold text-[#111827]">
@@ -978,7 +1233,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
               </p>
             </article>
 
-            <article className="scroll-card-lifecycle rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+            <article className="scroll-card-lifecycle rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-6">
               <div className="flex items-center gap-2 text-[#0F766E]">
                 <Eye className="h-4 w-4" />
                 <h3 className="text-sm font-semibold text-[#111827]">
@@ -991,7 +1246,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
               </p>
             </article>
 
-            <article className="scroll-card-lifecycle rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+            <article className="scroll-card-lifecycle rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-6">
               <div className="flex items-center gap-2 text-[#B45309]">
                 <Ruler className="h-4 w-4" />
                 <h3 className="text-sm font-semibold text-[#111827]">
@@ -1006,7 +1261,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
           </div>
 
           {/* Lineage card tracing directly from C8286 Parallel Computing 2D benchmark */}
-          <div className="mt-8 rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+          <div className="mt-8 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-3xl space-y-2">
                 <div className="font-mono-tech text-[11px] font-semibold uppercase tracking-wider text-[#0F766E]">
@@ -1034,7 +1289,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
       </section>
 
       {/* Benchmark Launch Cards with Scroll Lifecycle Entry/Exit & View Transitions */}
-      <section className="border-t border-[#E2E5EA] bg-[#F7F7F5] py-16">
+      <section className="border-t border-[#E2E5EA] bg-[#FFFFFF] py-16">
         <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -1059,7 +1314,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
             {benchmarks.map((scene) => (
               <div
                 key={scene.id}
-                className="benchmark-card scroll-card-lifecycle group flex flex-col overflow-hidden rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] transition-colors hover:border-[#1D4ED8]/50"
+                className="benchmark-card scroll-card-lifecycle group flex flex-col overflow-hidden rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] transition-colors hover:border-[#1D4ED8]/50"
               >
                 <div className="benchmark-thumb aspect-[3/2] overflow-hidden border-b border-[#E2E5EA] bg-[#F0F2F5]">
                   <img

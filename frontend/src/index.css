@@ -232,6 +232,81 @@
       backface-visibility: hidden;
     }
 
+    /* Alternating Left/Right Problematic Scroll Choreography (Zero Horizontal Overflow) */
+    .problem-scroll-section {
+      overflow-x: clip;
+      view-timeline: --problem-rail block;
+    }
+
+    @keyframes problem-rail-grow {
+      from {
+        transform: scaleY(0);
+      }
+      to {
+        transform: scaleY(1);
+      }
+    }
+
+    @keyframes slide-in-left {
+      from {
+        opacity: 0;
+        transform: translateX(-56px) translateY(14px) scale(0.97);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0) translateY(0) scale(1);
+      }
+    }
+
+    @keyframes slide-in-right {
+      from {
+        opacity: 0;
+        transform: translateX(56px) translateY(14px) scale(0.97);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0) translateY(0) scale(1);
+      }
+    }
+
+    @keyframes axis-node-pop {
+      from {
+        opacity: 0.2;
+        transform: scale(0.65);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .problem-rail-fill {
+      transform-origin: top center;
+      animation: problem-rail-grow linear both;
+      animation-timeline: --problem-rail;
+      animation-range: entry 15% cover 85%;
+    }
+
+    .scroll-enter-left {
+      animation: slide-in-left linear both;
+      animation-timeline: view();
+      animation-range: entry 4% cover 36%;
+      backface-visibility: hidden;
+    }
+
+    .scroll-enter-right {
+      animation: slide-in-right linear both;
+      animation-timeline: view();
+      animation-range: entry 4% cover 36%;
+      backface-visibility: hidden;
+    }
+
+    .scroll-axis-node {
+      animation: axis-node-pop linear both;
+      animation-timeline: view();
+      animation-range: entry 8% cover 36%;
+    }
+
     /* Staggered Hero Parallax via custom property --parallax-y */
     .parallax-hero-scope {
       view-timeline: --hero-parallax block;
@@ -311,6 +386,10 @@
 }
 
 /* Off-screen WebGL pausing container */
+.problem-scroll-section {
+  overflow-x: clip;
+}
+
 .webgl-stage-container {
   content-visibility: auto;
   contain-intrinsic-size: 640px 540px;
@@ -383,6 +462,10 @@ input[type="range"].optical-slider::-moz-range-thumb {
   .reveal-on-scroll,
   .scrolly-card-inner,
   .scroll-card-lifecycle,
+  .problem-rail-fill,
+  .scroll-enter-left,
+  .scroll-enter-right,
+  .scroll-axis-node,
   .parallax-layer,
   .scroll-affordance-fade-x {
     animation: none !important;

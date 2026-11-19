@@ -34,8 +34,20 @@ const DEFAULT_THINKING_BY_MODEL: Record<GeminiModelId, ThinkingLevel> = {
   'gemini-3.5-flash-lite': 'low',
 };
 
+const VALID_VIEWS: AppSection[] = ['landing', 'lab', 'multiframe', 'metrics'];
+
+function getInitialQueryParams(): { view: AppSection; scene?: string } {
+  if (typeof window === 'undefined') return { view: 'landing' };
+  const params = new URLSearchParams(window.location.search);
+  const rawView = params.get('view') as AppSection | null;
+  const view = rawView && VALID_VIEWS.includes(rawView) ? rawView : 'landing';
+  const scene = params.get('scene') ?? undefined;
+  return { view, scene };
+}
+
 export function App() {
-  const [activeSection, setActiveSection] = useState<AppSection>('landing');
+  const initialQuery = useRef(getInitialQueryParams());
+  const [activeSection, setActiveSection] = useState<AppSection>(initialQuery.current.view);
   const [selectedModel, setSelectedModel] = useState<GeminiModelId>('gemini-4-hydrogen');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high');
 
@@ -181,12 +193,15 @@ export function App() {
         }
         setBenchmarks(list);
         if (list.length > 0) {
+          const requestedId = initialQuery.current.scene;
+          const initialScene =
+            (requestedId && list.find((b) => b.id === requestedId)) || list[0];
           await runBenchmarkAnalysis(
-            list[0].id,
+            initialScene.id,
             list,
             'gemini-4-hydrogen',
             'high',
-            list[0].fov_h_deg || 60,
+            initialScene.fov_h_deg || 60,
             ''
           );
         }
@@ -203,6 +218,20 @@ export function App() {
       active = false;
     };
   }, [runBenchmarkAnalysis]);
+
+  // Honor URL hash fragments (#problematica-scroll, #scrolly-3d-story) after landing mounts
+  useEffect(() => {
+    if (activeSection !== 'landing' || benchmarks.length === 0) return;
+    const rawHash = window.location.hash.replace(/^#/, '');
+    if (!rawHash) return;
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById(rawHash);
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [activeSection, benchmarks.length]);
 
   const handleSelectModel = (model: GeminiModelId) => {
     setSelectedModel(model);
