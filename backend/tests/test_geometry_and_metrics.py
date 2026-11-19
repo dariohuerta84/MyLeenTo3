@@ -565,3 +565,129 @@ def test_local_3d_lift_mask_and_point_cloud_packing() -> None:
     with Image.open(io.BytesIO(base64.b64decode(depth_b64))) as depth_img:
         assert depth_img.format == "PNG"
         assert depth_img.width <= 80
+
+
+def test_metrics_nds_static_and_depth_bins() -> None:
+    bm = get_benchmark("lab_desk_calibrated")
+    preds = bm["demo_predictions_by_model"]["gemini-4-hydrogen"]["objects"]
+    ev = evaluate_scene_predictions(
+        preds,
+        bm["gt_objects"],
+        int(bm["width"]),
+        int(bm["height"]),
+        float(bm["fov_h_deg"]),
+        seed=42,
+    )
+    assert 0.5 <= ev["nds_static"] <= 1.0
+    bins = ev["depth_bins"]
+    assert len(bins) == 3
+    assert [b["bin"] for b in bins] == ["near_0_2m", "mid_2_3.5m", "far_3.5m_plus"]
+    assert sum(b["gt_count"] for b in bins) == len(bm["gt_objects"])
+
+
+def test_real_photo_optical_sharpness_and_noise() -> None:
+    from PIL import ImageFilter
+    from app.core.real_photo_metrics import compute_optical_sharpness_and_noise
+
+    h, w = 96, 128
+    xx, yy = np.meshgrid(np.arange(w), np.arange(h))
+    checker = (((xx // 4) + (yy // 4)) % 2).astype(np.float32)
+    rgb_sharp = np.stack([checker, checker, checker], axis=-1)
+    sharp_res = compute_optical_sharpness_and_noise(rgb_sharp, fov_h_deg=60.0, width=w, height=h)
+    assert sharp_res["laplacian_variance"] >= 180.0
+    assert sharp_res["focus_quality"] == "sharp"
+    assert sharp_res["equivalent_focal_35mm_mm"] == pytest.approx(31.18, abs=0.2)
+
+    pil_sharp = Image.fromarray((rgb_sharp * 255).astype(np.uint8), mode="RGB")
+    rgb_blur = np.asarray(pil_sharp.filter(ImageFilter.GaussianBlur(radius=6.0)), dtype=np.float32) / 255.0
+    blur_res = compute_optical_sharpness_and_noise(rgb_blur, fov_h_deg=60.0, width=w, height=h)
+    assert blur_res["laplacian_variance"] < 45.0
+    assert blur_res["focus_quality"] == "blurry"
+
+
+def test_real_photo_normal_depth_consistency_and_manhattan() -> None:
+    from app.core.real_photo_metrics import compute_normal_depth_consistency
+
+    h, w = 64, 64
+    xs = np.linspace(-0.5, 0.5, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.5, 0.5, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    # Gentle planar slope z = 1.8 - 0.15*x + 0.10*y
+    pts_cv[..., 2] = 1.8 - 0.15 * pts_cv[..., 0] + 0.10 * pts_cv[..., 1]
+    valid = np.ones((h, w), dtype=bool)
+
+    # Normal to z + 0.15*x - 0.10*y = 1.8 pointing toward -Z camera
+    n_exact = np.array([-0.15, 0.10, -1.0], dtype=np.float32)
+    n_exact /= np.linalg.norm(n_exact)
+    normals_ok = np.broadcast_to(n_exact, (h, w, 3)).copy()
+
+    res_ok = compute_normal_depth_consistency(pts_cv, normals_ok, valid)
+    assert res_ok["has_model_normals"] is True
+    assert res_ok["median_angular_error_deg"] < 2.0
+    assert res_ok["consistent_ratio_15deg"] > 0.99
+    assert res_ok["ndc_score_0_100"] > 95.0
+    assert res_ok["manhattan_alignment_score"] > 0.85
+
+    # Tilted inconsistent normals (>45 deg off)
+    n_bad = np.array([0.8, 0.0, -0.2], dtype=np.float32)
+    n_bad /= np.linalg.norm(n_bad)
+    normals_bad = np.broadcast_to(n_bad, (h, w, 3)).copy()
+    res_bad = compute_normal_depth_consistency(pts_cv, normals_bad, valid)
+    assert res_bad["median_angular_error_deg"] > 35.0
+    assert res_bad["ndc_score_0_100"] < 30.0
+
+
+def test_real_photo_ransac_boundaries_and_object_metrology() -> None:
+    from app.core.real_photo_metrics import (
+        compute_depth_boundary_sharpness,
+        compute_object_point_cloud_metrology,
+        fit_ransac_dominant_plane,
+    )
+
+    h, w = 80, 100
+    xs = np.linspace(-0.4, 0.4, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.3, 0.3, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    # Horizontal support plane in Gemini space means Z_gem = -Y_cv = -0.50 => Y_cv = +0.50
+    pts_cv[..., 1] = 0.50
+    pts_cv[..., 2] = 1.60 + np.broadcast_to(ys, (h, w)) * 1.2
+
+    valid = np.ones((h, w), dtype=bool)
+    # Add 15% floating outlier box above the horizontal plane
+    obj_mask = np.zeros((h, w), dtype=bool)
+    obj_mask[24:56, 36:64] = True
+    pts_cv[obj_mask, 0] = np.broadcast_to(xs, (h, w))[obj_mask] * 0.6
+    pts_cv[obj_mask, 1] = np.broadcast_to(ys, (h, w))[obj_mask] * 0.6
+    pts_cv[obj_mask, 2] = 1.15
+
+    ransac = fit_ransac_dominant_plane(pts_cv, valid, seed=42)
+    assert ransac["detected"] is True
+    assert ransac["plane_orientation"] == "horizontal_support"
+    assert ransac["plane_tilt_deg"] < 5.0
+    assert ransac["rmse_residual_m"] < 0.015
+    assert ransac["plane_height_z_m"] == pytest.approx(-0.50, abs=0.03)
+
+    rgb_u8 = np.full((h, w, 3), 210, dtype=np.uint8)
+    rgb_u8[obj_mask] = [30, 80, 190]
+    bnd = compute_depth_boundary_sharpness(pts_cv[..., 2], rgb_u8, valid)
+    assert bnd["depth_rgb_boundary_f1"] > 0.55
+    assert 0.0 <= bnd["flying_pixel_ratio"] < 0.25
+
+    box_3d = [0.0, 1.15, 0.0, 0.14, 0.04, 0.12, 0.0, 0.0, 0.0]
+    obj_met = compute_object_point_cloud_metrology(
+        pts_cv,
+        None,
+        obj_mask,
+        valid,
+        box_3d,
+        fov_h_deg=60.0,
+        object_id="moge_test_1",
+        label="test_panel",
+    )
+    assert obj_met["point_count"] == int(np.sum(obj_mask))
+    assert obj_met["surface_fit_rmse_m"] < 0.03
+    assert obj_met["visible_surface_area_m2"] > 0.01
+    assert obj_met["fill_solidity_ratio"] > 0.10

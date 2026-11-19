@@ -78,11 +78,21 @@ export interface BootstrapCI95 {
   n_boot: number;
 }
 
+export interface DepthBinMetric {
+  bin: string;
+  label: string;
+  gt_count: number;
+  matched_count: number;
+  mIoU_3D: number;
+  ate_m: number;
+}
+
 export interface SceneMetrics {
   mIoU_3D: number;
   mIoU_BEV: number;
   ap_25: number;
   ap_50: number;
+  nds_static?: number;
   ate_m: number;
   ase: number;
   aoe_deg: number;
@@ -90,6 +100,7 @@ export interface SceneMetrics {
   matched_count: number;
   gt_count: number;
   pred_count: number;
+  depth_bins?: DepthBinMetric[];
   bootstrap_ci_95: BootstrapCI95;
   per_object_matches: PerObjectMatch[];
 }
@@ -107,6 +118,11 @@ export interface ImagePhotometricProfile {
   bloom_saturation_ratio: number;
   spectral_entropy_bits: number;
   perspective_coherence_score: number;
+  laplacian_variance?: number;
+  focus_quality?: 'sharp' | 'moderate' | 'blurry' | string;
+  noise_sigma_est?: number;
+  dynamic_contrast_ratio?: number;
+  equivalent_focal_35mm_mm?: number;
   domain_classification:
     | 'calibrated_studio'
     | 'natural_indoor'
@@ -202,6 +218,60 @@ export interface PointCloudData {
   };
 }
 
+export interface PerObjectPointCloudMetrology {
+  object_id: string;
+  label: string;
+  point_count: number;
+  surface_fit_rmse_m: number;
+  fill_solidity_ratio: number;
+  visible_surface_area_m2: number;
+  depth_iqr_m: number;
+  angular_span_deg: [number, number];
+  normal_consistency_deg: number;
+}
+
+export interface RealPhotoMetrics {
+  normal_depth_consistency: {
+    has_model_normals: boolean;
+    mean_angular_error_deg: number;
+    median_angular_error_deg: number;
+    consistent_ratio_15deg: number;
+    ndc_score_0_100: number;
+    manhattan_alignment_score: number;
+  };
+  manhattan_alignment_score: number;
+  ransac_plane: {
+    detected: boolean;
+    inlier_ratio: number;
+    rmse_residual_m: number;
+    plane_tilt_deg: number;
+    plane_height_z_m: number;
+    plane_normal_gemini: [number, number, number];
+    plane_orientation: string;
+  };
+  depth_boundaries: {
+    depth_rgb_boundary_f1: number;
+    flying_pixel_ratio: number;
+    depth_smoothness_index: number;
+  };
+  depth_profile: {
+    depth_dynamic_range_ratio: number;
+    foreground_ratio: number;
+    metric_scale_regime: string;
+    scene_span_xyz_m: [number, number, number];
+  };
+  optical_telemetry: {
+    laplacian_variance: number;
+    focus_quality: string;
+    noise_sigma_est: number;
+    dynamic_contrast_ratio: number;
+    equivalent_focal_35mm_mm: number;
+  };
+  fov_exif_vs_moge_diff_deg?: number | null;
+  per_object_metrology: PerObjectPointCloudMetrology[];
+  overall_3d_geometry_score_0_100: number;
+}
+
 export interface HealthResponse {
   status: string;
   gemini_env_configured: boolean;
@@ -234,6 +304,7 @@ export interface AnalyzeResponse {
   depth_map_base64?: string | null;
   depth_stats?: DepthStats | null;
   point_cloud?: PointCloudData | null;
+  real_photo_metrics?: RealPhotoMetrics | null;
   latency_ms: number;
   usage?: Record<string, unknown> | null;
   mode: string;

@@ -8,7 +8,7 @@
 ![React 19 + Three.js](https://img.shields.io/badge/Frontend-React_19_+_Three.js-1D4ED8?style=for-the-badge&logo=threedotjs&logoColor=white)
 ![Google AI Studio v1](https://img.shields.io/badge/Gemini-Interactions_API_v1-0F766E?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![MoGe-2 + YOLOE GPU](https://img.shields.io/badge/3D_Local-MoGe--2_%2B_YOLOE_GPU-1D4ED8?style=for-the-badge)
-![Pytest 42/42](https://img.shields.io/badge/Pytest-42%2F42_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
+![Pytest 46/46](https://img.shields.io/badge/Pytest-46%2F46_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
 ![SEED 42](https://img.shields.io/badge/Reproducibility-SEED_%3D_42-B45309?style=for-the-badge)
 [![Predecesor 2D](https://img.shields.io/badge/Evolución_de-C8286_Visión_2D-4B5563?style=for-the-badge&logo=github)](https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN)
 
@@ -54,8 +54,8 @@ La portada interactiva (`#problematica-scroll`) introduce la problemática media
 <table>
   <tr>
     <td width="50%" align="center">
-      <strong>1 · Editorial Athene + Partículas Reactivas al Scroll</strong><br/>
-      <img src="docs/assets/app_problem_scroll_preview.png" alt="Landing editorial con tipografía Athene, partículas 3D al scroll y láminas arquitectónicas" width="100%"/>
+      <strong>1 · Editorial Formal Source Serif 4 + Partículas Reactivas al Scroll</strong><br/>
+      <img src="docs/assets/app_problem_scroll_preview.png" alt="Landing editorial formal con Source Serif 4, partículas 3D espaciadas al scroll bidireccional y láminas arquitectónicas" width="100%"/>
     </td>
     <td width="50%" align="center">
       <strong>2 · Laboratorio 3D Vivo (Pinhole + Three.js + MoGe-2 Nube 3D)</strong><br/>
@@ -120,8 +120,10 @@ flowchart LR
     subgraph Backend["Backend FastAPI (Python 3.12)"]
         API["REST API (/api/* · 9 Endpoints)"]
         GEO["core/geometry_3d.py (ZYX, Rx(-90°), Pinhole K, SAT, Kay-Kajiya)"]
-        DIA["core/intrinsic_diagnostics.py (PECS, PVI, GFI, SDAS, cascade_policy)"]
-        L3D["services/local_metric_3d.py (EXIF 35mm + MoGe-2 ViT-S + YOLOE-OV)"]
+        MTR["core/metrics.py (NDS, Omni3D Depth Bins, mIoU, AP, ATE/AOE)"]
+        DIA["core/intrinsic_diagnostics.py (PECS, PVI, GFI, SDAS, Optica)"]
+        RPM["core/real_photo_metrics.py (NDC, Manhattan, RANSAC, DBE, Area)"]
+        L3D["services/local_metric_3d.py (EXIF 35mm + MoGe-2 Normals + YOLOE)"]
         SVC["services/gemini_vision.py & spatial_agent.py"]
     end
 
@@ -133,7 +135,9 @@ flowchart LR
     V2D <-->|Sincronización 2D-3D + Depth Map| V3D
     COP <-->|scene_actions| V3D
     API --> GEO
+    API --> MTR
     API --> DIA
+    API --> RPM
     API --> L3D
     API --> SVC
     SVC <-->|Opcional con API Key| INT
@@ -146,10 +150,11 @@ flowchart LR
    $$\mathbf{b} = [x, y, z, \Delta x, \Delta y, \Delta z, r, p, \psi] \in \mathbb{R}^9$$
    con cuaternión intrínseco ZYX y matriz ortogonal de preservación quiral hacia Three.js $M = R_x(-90^\circ) \in SO(3)$ ($\det(M) = +1$):
    $$\mathbf{p}_{\text{three}} = \begin{pmatrix} x \\ z \\ -y \end{pmatrix}, \qquad R_{\text{three}} = M R_{\text{gem}} M^\top, \qquad \mathbf{s}_{\text{three}} = (\Delta x, \Delta z, \Delta y)$$
-2. **Motor Métrico Local GPU (`EXIF + MoGe-2 ViT-S + YOLOE-OV`):** extrae `FocalLengthIn35mmFilm` y transposición EXIF, infiere nube densa métrica $(X_{\text{cv}}, Y_{\text{cv}}, Z_{\text{cv}})$ en metros junto con $\text{FOV}_h$ automático (`Ruicheng/moge-2-vits-normal`, `~1.3 GB` VRAM FP16), segmenta instancias abiertas (`yoloe-11s-seg.pt`), eleva máscaras a cuboides 9-DOF orientados y exporta nube de puntos 3D coloreada (`THREE.Points`, hasta 16,000 vértices) más mapa de profundidad mate (`#B45309` cerca $\to$ `#0F766E` $\to$ `#1E293B` lejos) con encuadre dinámico macro-a-habitación.
+2. **Motor Métrico Local GPU (`EXIF + MoGe-2 ViT-S + YOLOE-OV`):** extrae `FocalLengthIn35mmFilm` y transposición EXIF, infiere nube densa métrica $(X_{\text{cv}}, Y_{\text{cv}}, Z_{\text{cv}})$ en metros, mapa de normales locales y $\text{FOV}_h$ automático (`Ruicheng/moge-2-vits-normal`, `~1.3 GB` VRAM FP16), segmenta instancias abiertas (`yoloe-11s-seg.pt`), eleva máscaras a cuboides 9-DOF orientados y exporta nube de puntos 3D coloreada (`THREE.Points`, hasta 16,000 vértices) más mapa de profundidad mate (`#B45309` cerca $\to$ `#0F766E` $\to$ `#1E293B` lejos) con encuadre dinámico macro-a-habitación.
 3. **Proyección Pinhole y Campo Vertical:** $f = W / (2\tan(\text{FOV}_h/2))$, $\text{FOV}_v = 2\arctan(\tan(\text{FOV}_h/2)\cdot H/W)$.
-4. **Métricas Exactas y Trazado de Rayos:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$) y matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera.
+4. **Métricas Exactas, NDS y Omni3D:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$), matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera, puntaje estático **`nds_static`** (*nuScenes*) y desglose **Omni3D** por rangos de profundidad (`near_0_2m`, `mid_2_3.5m`, `far_3.5m_plus`).
 5. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
+6. **Metrología 3D de Foto Real (`real_photo_metrics.py`):** evalúa sobre fotografías reales sin Ground Truth la consistencia normal–profundidad `NDC` (normals de MoGe-2 vs. producto cruzado parcial $\partial\mathbf{P}/\partial v \times \partial\mathbf{P}/\partial u$), alineación ortogonal *Manhattan* (`manhattan_alignment_score`), plano dominante vía `RANSAC` (`RMSE`, pendiente en grados e *inliers*), nitidez de bordes profundidad–RGB tipo *Depth Pro* (`DBE` F1 y ratio de *flying pixels*), perfil óptico (varianza Laplaciana, ruido $\sigma$ y focal equivalente 35 mm), además de área superficial 3D visible ($\text{m}^2$) y ajuste SDF a OBB por cada instancia detectada.
 
 </details>
 
@@ -187,7 +192,7 @@ Levanta automáticamente FastAPI en **`http://127.0.0.1:8085`** y React/Vite en 
 # 1. Opcional: dependencias PyTorch CUDA + MoGe-2 + YOLOE para reconstrucción métrica local GPU
 uv pip install --python backend/.venv/bin/python -r backend/requirements-local-3d.txt
 
-# 2. Suite completa de 42 pruebas deterministas offline (geometría, métricas 3D locales, API y compuerta)
+# 2. Suite completa de 46 pruebas deterministas offline (geometría, metrología 3D real, API y compuerta)
 MYLEENTO3_LOCAL_3D_ENGINE=0 backend/.venv/bin/pytest -v
 
 # 2. Pruebas en vivo HTTP de los 3 modelos + 3 fotos diversas (requiere servidor en :8085)

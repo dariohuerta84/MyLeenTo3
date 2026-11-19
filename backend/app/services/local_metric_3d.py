@@ -26,6 +26,11 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image, ImageOps
 
+from ..core.real_photo_metrics import (
+    compute_object_point_cloud_metrology,
+    compute_real_photo_3d_metrics,
+)
+
 try:
     import cv2  # type: ignore
 except Exception:  # pragma: no cover - optional in CPU-only CI
@@ -571,6 +576,14 @@ def _run_moge2_inference(
     else:
         valid_mask = np.isfinite(dep) & (dep > 0.04) & (dep < 60.0)
 
+    normals: Optional[np.ndarray] = None
+    if "normal" in out and out["normal"] is not None:
+        nrm = out["normal"].detach().float().cpu().numpy()
+        if nrm.ndim == 4:
+            nrm = nrm[0]
+        if nrm.ndim == 3 and nrm.shape[-1] == 3:
+            normals = nrm
+
     # Extract normalized horizontal FOV from MoGe-2 predicted intrinsics
     moge_fov_h = 60.0
     if "intrinsics" in out and out["intrinsics"] is not None:
@@ -584,6 +597,7 @@ def _run_moge2_inference(
     return {
         "points_cv": pts,
         "depth_m": dep,
+        "normals_cv": normals,
         "valid_mask": valid_mask,
         "rgb_u8": rgb_u8,
         "proc_width": int(rgb_u8.shape[1]),
@@ -620,6 +634,19 @@ def extract_depth_and_point_cloud(
     point_cloud = pack_point_cloud_threejs(
         moge_out["points_cv"], moge_out["rgb_u8"], moge_out["valid_mask"]
     )
+    real_metrics = compute_real_photo_3d_metrics(
+        points_cv=moge_out["points_cv"],
+        depth_m=moge_out["depth_m"],
+        normals_cv=moge_out.get("normals_cv"),
+        rgb_u8=moge_out["rgb_u8"],
+        valid_mask=moge_out["valid_mask"],
+        effective_fov_h_deg=effective_fov,
+        exif_fov_h_deg=exif_fov_h_deg,
+        moge_fov_h_deg=moge_fov,
+        width=w,
+        height=h,
+        per_object_metrology=[],
+    )
     return {
         "width": w,
         "height": h,
@@ -630,6 +657,7 @@ def extract_depth_and_point_cloud(
         "depth_map_base64": depth_b64,
         "depth_stats": depth_stats,
         "point_cloud": point_cloud,
+        "real_photo_metrics": real_metrics,
         "device": moge_out["device"],
         "device_desc": moge_out["device_desc"],
     }
@@ -774,9 +802,39 @@ def run_local_metric_3d(
             max_objects=min(max_objects, 4),
         )
 
+    per_object_metrology: list[dict[str, Any]] = []
+    for idx_m, obj_item in enumerate(lifted_objects):
+        mask_m = kept_masks_proc[idx_m] if idx_m < len(kept_masks_proc) else None
+        if mask_m is not None:
+            per_object_metrology.append(
+                compute_object_point_cloud_metrology(
+                    moge_out["points_cv"],
+                    moge_out.get("normals_cv"),
+                    mask_m,
+                    moge_out["valid_mask"],
+                    obj_item["box_3d"],
+                    effective_fov,
+                    object_id=obj_item["id"],
+                    label=obj_item["label"],
+                )
+            )
+
     depth_b64, depth_stats = render_depth_map_png(moge_out["depth_m"], moge_out["valid_mask"])
     point_cloud = pack_point_cloud_threejs(
         moge_out["points_cv"], rgb_u8, moge_out["valid_mask"]
+    )
+    real_metrics = compute_real_photo_3d_metrics(
+        points_cv=moge_out["points_cv"],
+        depth_m=moge_out["depth_m"],
+        normals_cv=moge_out.get("normals_cv"),
+        rgb_u8=rgb_u8,
+        valid_mask=moge_out["valid_mask"],
+        effective_fov_h_deg=effective_fov,
+        exif_fov_h_deg=exif_fov_h_deg,
+        moge_fov_h_deg=moge_fov,
+        width=w,
+        height=h,
+        per_object_metrology=per_object_metrology,
     )
     latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
@@ -806,5 +864,6 @@ def run_local_metric_3d(
         "depth_map_base64": depth_b64,
         "depth_stats": depth_stats,
         "point_cloud": point_cloud,
+        "real_photo_metrics": real_metrics,
         "latency_ms": latency_ms,
     }

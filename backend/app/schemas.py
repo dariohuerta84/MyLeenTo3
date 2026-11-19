@@ -159,6 +159,7 @@ class AnalyzeResponse(BaseModel):
     depth_map_base64: Optional[str] = None
     depth_stats: Optional[dict[str, float]] = None
     point_cloud: Optional[dict[str, Any]] = None
+    real_photo_metrics: Optional[dict[str, Any]] = None
     latency_ms: float
     usage: dict[str, Any]
 

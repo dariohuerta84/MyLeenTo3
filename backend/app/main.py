@@ -202,6 +202,7 @@ def analyze_scene(
     depth_map_base64: Optional[str] = None
     depth_stats: Optional[dict[str, float]] = None
     point_cloud: Optional[dict[str, Any]] = None
+    real_photo_metrics: Optional[dict[str, Any]] = None
 
     use_local_depth = req.engine != "salience_fallback" and is_local_3d_available()
 
@@ -220,6 +221,7 @@ def analyze_scene(
                 depth_map_base64 = depth_ctx["depth_map_base64"]
                 depth_stats = depth_ctx["depth_stats"]
                 point_cloud = depth_ctx["point_cloud"]
+                real_photo_metrics = depth_ctx.get("real_photo_metrics")
             except Exception:
                 pass
         try:
@@ -271,6 +273,7 @@ def analyze_scene(
                     depth_map_base64 = local_res["depth_map_base64"]
                     depth_stats = local_res["depth_stats"]
                     point_cloud = local_res["point_cloud"]
+                    real_photo_metrics = local_res.get("real_photo_metrics")
                     latency_ms = local_res["latency_ms"]
                     mode = local_res["mode"]
                     notice = (
@@ -350,6 +353,7 @@ def analyze_scene(
                 depth_map_base64 = local_res["depth_map_base64"]
                 depth_stats = local_res["depth_stats"]
                 point_cloud = local_res["point_cloud"]
+                real_photo_metrics = local_res.get("real_photo_metrics")
                 latency_ms = local_res["latency_ms"]
                 mode = local_res["mode"]
                 notice = (
@@ -444,6 +448,7 @@ def analyze_scene(
         depth_map_base64=depth_map_base64,
         depth_stats=depth_stats,
         point_cloud=point_cloud,
+        real_photo_metrics=real_photo_metrics,
         latency_ms=latency_ms,
         usage=usage,
     )

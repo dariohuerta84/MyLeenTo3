@@ -59,7 +59,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             </svg>
           </span>
           <span className="flex flex-col leading-none">
-            <span className="font-serif-editorial text-lg tracking-tight text-[#111827]">
+            <span className="font-serif-editorial text-base font-semibold tracking-tight text-[#111827]">
               MyLeenTo3
             </span>
             <span className="font-mono-tech text-[10px] text-[#4B5563]">

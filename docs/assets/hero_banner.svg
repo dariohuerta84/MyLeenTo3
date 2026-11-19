@@ -27,8 +27,8 @@
   <text x="614" y="34" text-anchor="end" font-family="JetBrains Mono, Liberation Mono, monospace" font-size="10.5" font-weight="600" letter-spacing="1.2" fill="#0F766E">MOGE-2 GPU + GEMINI v1</text>
   <line x1="44" y1="45" x2="614" y2="45" stroke="#111827" stroke-opacity="0.18" stroke-width="1"/>
 
-  <!-- Left editorial Athene-style serif display & typographic KPI ledger -->
-  <text x="44" y="114" font-family="Athene, Instrument Serif, Georgia, Liberation Serif, serif" font-size="56" font-weight="400" fill="#111827">MyLeenTo3</text>
+  <!-- Left editorial Source Serif 4 display & typographic KPI ledger -->
+  <text x="44" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="56" font-weight="500" fill="#111827">MyLeenTo3</text>
   <text x="44" y="148" font-family="Inter, Liberation Sans, sans-serif" font-size="16" font-weight="600" fill="#1D4ED8">Percepción Espacial 3D Monocular y Compuerta Adaptativa</text>
   <text x="44" y="176" font-family="Inter, Liberation Sans, sans-serif" font-size="13" fill="#4B5563">Nube métrica local (EXIF + MoGe-2 ViT-S + YOLOE), poses 9-DOF verificadas</text>
   <text x="44" y="195" font-family="Inter, Liberation Sans, sans-serif" font-size="13" fill="#4B5563">en Python y control adaptativo sin depender de hardware LiDAR.</text>
@@ -49,7 +49,7 @@
     <line x1="436" y1="-10" x2="436" y2="36" stroke="#CBD5E1" stroke-width="1"/>
 
     <text x="452" y="0" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#4B5563">TESTS SUITE</text>
-    <text x="452" y="26" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#111827">42/42 OK</text>
+    <text x="452" y="26" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#111827">46/46 OK</text>
   </g>
 
   <!-- Right animated optical workbench panel -->

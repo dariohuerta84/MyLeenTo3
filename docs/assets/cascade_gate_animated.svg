@@ -16,7 +16,7 @@
   <!-- Node 1 -->
   <rect x="28" y="64" width="210" height="148" fill="#FFFFFF" stroke="#111827" stroke-opacity="0.2"/>
   <text x="44" y="88" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#4B5563">01 / ENTRADA</text>
-  <text x="44" y="114" font-family="Athene, Instrument Serif, Georgia, serif" font-size="22" fill="#111827">Foto RGB + EXIF</text>
+  <text x="44" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="22" fill="#111827">Foto RGB + EXIF</text>
   <line x1="44" y1="126" x2="220" y2="126" stroke="#E2E5EA"/>
   <text x="44" y="148" font-family="JetBrains Mono, monospace" font-size="10" fill="#4B5563">Focal 35mm / Transpose</text>
   <text x="44" y="168" font-family="JetBrains Mono, monospace" font-size="10" fill="#1D4ED8">FOV_h [25°..120°]</text>
@@ -29,7 +29,7 @@
   <!-- Node 2 -->
   <rect x="294" y="64" width="256" height="148" fill="#FFFFFF" stroke="#1D4ED8" stroke-opacity="0.55" stroke-width="1.4"/>
   <text x="310" y="88" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#1D4ED8">02 / GPU RTX 3050</text>
-  <text x="310" y="114" font-family="Athene, Instrument Serif, Georgia, serif" font-size="22" fill="#111827">MoGe-2 + YOLOE-OV</text>
+  <text x="310" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="22" fill="#111827">MoGe-2 + YOLOE-OV</text>
   <line x1="310" y1="126" x2="532" y2="126" stroke="#E2E5EA"/>
   <text x="310" y="148" font-family="JetBrains Mono, monospace" font-size="10" fill="#111827">Nube métrica: 16,000 pts</text>
   <text x="310" y="168" font-family="JetBrains Mono, monospace" font-size="10" fill="#0F766E">Mapa profundidad + Máscaras</text>
@@ -42,7 +42,7 @@
   <!-- Node 3 -->
   <rect x="606" y="64" width="256" height="148" fill="#FFFFFF" stroke="#111827" stroke-opacity="0.3"/>
   <text x="622" y="88" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#0F766E">03 / FISICA PYTHON</text>
-  <text x="622" y="114" font-family="Athene, Instrument Serif, Georgia, serif" font-size="22" fill="#111827">Motor Quiral 9-DOF</text>
+  <text x="622" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="22" fill="#111827">Motor Quiral 9-DOF</text>
   <line x1="622" y1="126" x2="844" y2="126" stroke="#E2E5EA"/>
   <text x="622" y="148" font-family="JetBrains Mono, monospace" font-size="10" fill="#111827">det(M) = +1.0 · Pinhole K</text>
   <text x="622" y="168" font-family="JetBrains Mono, monospace" font-size="10" fill="#4B5563">SAT 15-ejes · Kay-Kajiya</text>

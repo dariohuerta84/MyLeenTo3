@@ -11,6 +11,7 @@ import type {
   MeasurementState,
   OcclusionEntry,
   PointCloudData,
+  RealPhotoMetrics,
   SceneAction,
   SceneMetrics,
   SpatialObject,
@@ -83,6 +84,7 @@ export function App() {
   const [depthMapBase64, setDepthMapBase64] = useState<string | null>(null);
   const [depthStats, setDepthStats] = useState<DepthStats | null>(null);
   const [fovSource, setFovSource] = useState<string | null>(null);
+  const [realPhotoMetrics, setRealPhotoMetrics] = useState<RealPhotoMetrics | null>(null);
   const [fovManualOverride, setFovManualOverride] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [modeBadge, setModeBadge] = useState<string>('calibrated_demo');
@@ -136,6 +138,7 @@ export function App() {
     setDepthMapBase64(null);
     setDepthStats(null);
     setFovSource(null);
+    setRealPhotoMetrics(null);
     setShowDepthMap(false);
     setFovManualOverride(false);
   }, []);
@@ -145,6 +148,7 @@ export function App() {
     setDepthMapBase64(res.depth_map_base64 ?? null);
     setDepthStats(res.depth_stats ?? null);
     setFovSource(res.fov_source ?? null);
+    setRealPhotoMetrics(res.real_photo_metrics ?? null);
     if (res.image_base64) {
       setImageBase64(res.image_base64);
       setImageMime(res.mime_type || 'image/png');
@@ -651,6 +655,7 @@ export function App() {
             metrics={metrics}
             fovSweep={fovSweep}
             intrinsicDiagnostics={intrinsicDiagnostics}
+            realPhotoMetrics={realPhotoMetrics}
             occlusionMatrix={occlusionMatrix}
             apiKey={apiKey}
             onFocusObjectInLab={handleFocusObjectInLab}

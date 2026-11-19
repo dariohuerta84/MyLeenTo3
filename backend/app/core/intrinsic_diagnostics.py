@@ -25,6 +25,7 @@ from .geometry_3d import (
     project_obb_to_2d,
 )
 from .metrics import DEFAULT_FOV_SWEEP_VALUES
+from .real_photo_metrics import compute_optical_sharpness_and_noise
 
 
 def _decode_rgb_array(
@@ -119,9 +120,14 @@ def _nearest_peak_distances(grad_norm: np.ndarray, threshold: float = 0.28) -> n
 
 def _analyze_photometric_profile(
     rgb: Optional[np.ndarray],
+    fov_h_deg: float = 60.0,
+    width: int = 960,
+    height: int = 640,
 ) -> tuple[dict[str, Any], Optional[np.ndarray], Optional[np.ndarray]]:
     """Extract photometric stress metrics and normalized Sobel edge map."""
     if rgb is None:
+        sensor_w = 36.0 if width >= height else 24.0
+        eq_f35 = (sensor_w * 0.5) / max(math.tan(math.radians(fov_h_deg) * 0.5), 1e-4)
         profile = {
             "luminance_mean": 0.50,
             "luminance_std": 0.18,
@@ -130,6 +136,11 @@ def _analyze_photometric_profile(
             "spectral_entropy_bits": 3.80,
             "perspective_coherence_score": 0.72,
             "domain_classification": "calibrated_studio",
+            "laplacian_variance": 240.0,
+            "focus_quality": "sharp",
+            "noise_sigma_est": 0.005,
+            "dynamic_contrast_ratio": 0.65,
+            "equivalent_focal_35mm_mm": round(eq_f35, 2),
         }
         return profile, None, None
 
@@ -180,6 +191,7 @@ def _analyze_photometric_profile(
         domain = "natural_indoor"
 
     dist_map = _nearest_peak_distances(grad_norm)
+    optical = compute_optical_sharpness_and_noise(rgb, fov_h_deg, width, height)
 
     profile = {
         "luminance_mean": round(lum_mean, 4),
@@ -189,6 +201,7 @@ def _analyze_photometric_profile(
         "spectral_entropy_bits": round(entropy_bits, 4),
         "perspective_coherence_score": round(persp_score, 4),
         "domain_classification": domain,
+        **optical,
     }
     return profile, grad_norm, dist_map
 
@@ -465,7 +478,12 @@ def compute_intrinsic_scene_diagnostics(
 ) -> dict[str, Any]:
     """Compute reference-free latent 3D metrics, photometric stress, and FOV sweep."""
     rgb = _decode_rgb_array(image_base64, max_width=320)
-    image_profile, grad_norm, dist_map = _analyze_photometric_profile(rgb)
+    image_profile, grad_norm, dist_map = _analyze_photometric_profile(
+        rgb,
+        fov_h_deg=fov_h_deg,
+        width=width,
+        height=height,
+    )
 
     if occlusion_matrix is None:
         occlusion_matrix = compute_occlusion_matrix(objects)

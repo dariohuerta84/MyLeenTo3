@@ -28,6 +28,7 @@ import type {
   FovSweepPoint,
   IntrinsicDiagnostics,
   OcclusionEntry,
+  RealPhotoMetrics,
   SceneMetrics,
   SpatialObject,
 } from '../types/spatial';
@@ -49,6 +50,7 @@ interface MetricsBenchmarkPanelProps {
   metrics?: SceneMetrics | null;
   fovSweep?: FovSweepPoint[] | null;
   intrinsicDiagnostics?: IntrinsicDiagnostics | null;
+  realPhotoMetrics?: RealPhotoMetrics | null;
   occlusionMatrix: OcclusionEntry[];
   apiKey: string;
   onFocusObjectInLab: (objectId: string) => void;
@@ -70,6 +72,7 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
   metrics,
   fovSweep,
   intrinsicDiagnostics,
+  realPhotoMetrics,
   occlusionMatrix,
   apiKey,
   onFocusObjectInLab,
@@ -191,12 +194,13 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
           </div>
 
           <div className="rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-4">
-            <div className="text-[11px] font-medium text-[#4B5563]">AP@0.25</div>
+            <div className="text-[11px] font-medium text-[#4B5563]">AP@0.25 · NDS</div>
             <div className="font-mono-tech mt-1 text-2xl font-semibold text-[#111827]">
               {formatPercent(metrics.ap_25)}
             </div>
             <div className="font-mono-tech mt-1 text-[10px] text-[#4B5563]">
-              AP@0.50: {formatPercent(metrics.ap_50)}
+              AP@0.50: {formatPercent(metrics.ap_50)} · NDS:{' '}
+              {((metrics.nds_static ?? 0) * 100).toFixed(1)}%
             </div>
           </div>
 
@@ -230,6 +234,29 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
               Emparejados: {metrics.matched_count}/{metrics.gt_count}
             </div>
           </div>
+
+          {metrics.depth_bins && metrics.depth_bins.length > 0 && (
+            <div className="sm:col-span-2 lg:col-span-6 grid gap-3 border border-[#E2E5EA] bg-[#FFFFFF] p-3.5 sm:grid-cols-3">
+              {metrics.depth_bins.map((b) => (
+                <div key={b.bin} className="border-l-2 border-[#1D4ED8]/35 pl-3">
+                  <div className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
+                    Rango Omni3D · {b.label}
+                  </div>
+                  <div className="font-mono-tech mt-1 flex items-baseline justify-between text-xs text-[#111827]">
+                    <span>
+                      mIoU 3D:{' '}
+                      <strong className="text-[#1D4ED8]">
+                        {b.gt_count > 0 ? formatPercent(b.mIoU_3D) : '—'}
+                      </strong>
+                    </span>
+                    <span className="text-[#4B5563]">
+                      ATE {b.gt_count > 0 ? formatMeters(b.ate_m, 3) : '—'} ({b.matched_count}/{b.gt_count})
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       ) : latent ? (
         <section aria-label="Diagnóstico intrínseco sin Ground Truth" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -478,8 +505,21 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
                 </div>
               ))}
 
+              <div className="font-mono-tech grid grid-cols-3 gap-2 border-t border-[#E2E5EA] pt-2.5 text-[10px] text-[#4B5563]">
+                <div>
+                  Nitidez: <strong className="text-[#111827]">{imgProf.focus_quality ?? 'sharp'}</strong>{' '}
+                  ({(imgProf.laplacian_variance ?? 0).toFixed(0)})
+                </div>
+                <div>
+                  Ruido σ: <strong className="text-[#111827]">{(imgProf.noise_sigma_est ?? 0).toFixed(4)}</strong>
+                </div>
+                <div>
+                  Eq. 35mm: <strong className="text-[#111827]">{(imgProf.equivalent_focal_35mm_mm ?? 31.2).toFixed(1)} mm</strong>
+                </div>
+              </div>
+
               {metrics && (
-                <div className="font-mono-tech grid grid-cols-3 gap-2 border-t border-[#E2E5EA] pt-2.5 text-[10px] text-[#4B5563]">
+                <div className="font-mono-tech grid grid-cols-3 gap-2 border-t border-[#E2E5EA] pt-2 text-[10px] text-[#4B5563]">
                   <div>PECS: {formatPercent(latent.photometric_edge_coherence)}</div>
                   <div>GFI: {formatMeters(latent.gravity_floating_anomaly_m, 2)}</div>
                   <div>±σ_y: {formatMeters(latent.mean_depth_uncertainty_m, 2)}</div>
@@ -846,6 +886,100 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
           </p>
         )}
       </section>
+
+      {/* Real-Photo SOTA 3D Metrology (MoGe-2 Normals + RANSAC + Depth Pro DBE) */}
+      {realPhotoMetrics && (
+        <section className="space-y-4 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E2E5EA] pb-3">
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-[#1D4ED8]" />
+              <div>
+                <h2 className="text-sm font-semibold text-[#111827]">
+                  Metrología 3D de Foto Real (MoGe-2 Normales + RANSAC + Depth Pro DBE)
+                </h2>
+                <p className="text-xs text-[#4B5563]">
+                  Consistencia normal–profundidad, plano dominante RANSAC, nitidez de bordes de profundidad y ajuste superficial por objeto en metros reales.
+                </p>
+              </div>
+            </div>
+            <span className="font-mono-tech rounded border border-[#1D4ED8]/25 bg-[#F7F7F5] px-2.5 py-1 text-xs font-semibold text-[#1D4ED8]">
+              Score Geométrico {realPhotoMetrics.overall_3d_geometry_score_0_100.toFixed(1)}/100
+            </span>
+          </div>
+
+          <div className="grid gap-4 border-b border-[#E2E5EA] pb-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="border-l-2 border-[#1D4ED8] pl-3">
+              <div className="text-[11px] font-medium text-[#4B5563]">Normal-Depth Consistency (NDC)</div>
+              <div className="font-mono-tech mt-1 text-base font-semibold text-[#111827]">
+                {realPhotoMetrics.normal_depth_consistency.median_angular_error_deg.toFixed(1)}° med ·{' '}
+                {realPhotoMetrics.normal_depth_consistency.ndc_score_0_100.toFixed(0)}/100
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                {(realPhotoMetrics.normal_depth_consistency.consistent_ratio_15deg * 100).toFixed(1)}% píxeles &lt; 15° · Manhattan{' '}
+                {(realPhotoMetrics.manhattan_alignment_score * 100).toFixed(0)}%
+              </div>
+            </div>
+
+            <div className="border-l-2 border-[#0F766E] pl-3">
+              <div className="text-[11px] font-medium text-[#4B5563]">Plano Dominante RANSAC</div>
+              <div className="font-mono-tech mt-1 text-base font-semibold text-[#111827]">
+                {realPhotoMetrics.ransac_plane.detected
+                  ? `${(realPhotoMetrics.ransac_plane.rmse_residual_m * 100).toFixed(2)} cm RMSE · ${realPhotoMetrics.ransac_plane.plane_tilt_deg.toFixed(1)}°`
+                  : 'No detectado'}
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                Orientación: {realPhotoMetrics.ransac_plane.plane_orientation} · Inliers{' '}
+                {(realPhotoMetrics.ransac_plane.inlier_ratio * 100).toFixed(0)}%
+              </div>
+            </div>
+
+            <div className="border-l-2 border-[#B45309] pl-3">
+              <div className="text-[11px] font-medium text-[#4B5563]">Bordes Profundidad-RGB (DBE)</div>
+              <div className="font-mono-tech mt-1 text-base font-semibold text-[#111827]">
+                F1 {(realPhotoMetrics.depth_boundaries.depth_rgb_boundary_f1 * 100).toFixed(1)}% · Fly{' '}
+                {(realPhotoMetrics.depth_boundaries.flying_pixel_ratio * 100).toFixed(2)}%
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                Envergadura {realPhotoMetrics.depth_profile.scene_span_xyz_m.map((v) => `${v.toFixed(2)}m`).join(' × ')} ·{' '}
+                {realPhotoMetrics.depth_profile.metric_scale_regime}
+              </div>
+            </div>
+          </div>
+
+          {realPhotoMetrics.per_object_metrology.length > 0 && (
+            <div className="scroll-affordance-x rounded-lg border border-[#E2E5EA]">
+              <table className="font-mono-tech w-full min-w-[760px] text-left text-[11px]">
+                <thead className="border-b border-[#E2E5EA] bg-[#F7F7F5] text-[#4B5563]">
+                  <tr>
+                    <th className="px-3 py-2 font-sans font-medium">Objeto</th>
+                    <th className="px-3 py-2 font-sans font-medium">Puntos 3D</th>
+                    <th className="px-3 py-2 font-sans font-medium">Área Visible (m²)</th>
+                    <th className="px-3 py-2 font-sans font-medium">Ajuste Caja RMSE (cm)</th>
+                    <th className="px-3 py-2 font-sans font-medium">Solidez</th>
+                    <th className="px-3 py-2 font-sans font-medium">Espesor IQR (cm)</th>
+                    <th className="px-3 py-2 font-sans font-medium">Error Normales (°)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E2E5EA]">
+                  {realPhotoMetrics.per_object_metrology.map((m) => (
+                    <tr key={m.object_id} className="hover:bg-[#F7F7F5]">
+                      <td className="px-3 py-2 font-sans font-semibold text-[#111827]">
+                        {m.label} <span className="font-mono-tech font-normal text-[#4B5563]">({m.object_id})</span>
+                      </td>
+                      <td className="px-3 py-2">{m.point_count.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-[#1D4ED8]">{m.visible_surface_area_m2.toFixed(4)}</td>
+                      <td className="px-3 py-2">{(m.surface_fit_rmse_m * 100).toFixed(2)} cm</td>
+                      <td className="px-3 py-2">{(m.fill_solidity_ratio * 100).toFixed(1)}%</td>
+                      <td className="px-3 py-2">{(m.depth_iqr_m * 100).toFixed(2)} cm</td>
+                      <td className="px-3 py-2">{m.normal_consistency_deg.toFixed(1)}°</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 9-DOF Poses Table */}
       <section className="rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-5">

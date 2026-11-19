@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 
+type ParticleVariant = 'dot' | 'ring' | 'cross';
+
 interface ParticleNode {
   cx: number;
   cy: number;
@@ -11,6 +13,7 @@ interface ParticleNode {
   phase: number;
   color: [number, number, number];
   layerBias: number;
+  variant: ParticleVariant;
 }
 
 interface ProjectedPoint {
@@ -19,14 +22,17 @@ interface ProjectedPoint {
   alpha: number;
   radius: number;
   color: [number, number, number];
+  variant: ParticleVariant;
 }
 
 interface LandingParticleFieldProps {
   reducedMotion: boolean;
 }
 
-const PARTICLE_COUNT = 240;
-const CONNECTION_DIST_SQ = 88 * 88;
+const PARTICLE_COUNT = 132;
+const MIN_DIST_3D_SQ = 0.34 * 0.34;
+const LINK_MIN_DIST_SQ = 52 * 52;
+const LINK_MAX_DIST_SQ = 148 * 148;
 const PALETTE: Array<[number, number, number]> = [
   [51, 65, 85],   // Slate #334155
   [29, 78, 216],  // Cobalt #1D4ED8
@@ -47,35 +53,65 @@ function mulberry32(seed: number): () => number {
 
 function buildParticles(): ParticleNode[] {
   const rng = mulberry32(42);
+  const cloudCoords: Array<[number, number, number]> = [];
+  let attempts = 0;
+
+  while (cloudCoords.length < PARTICLE_COUNT && attempts < 14000) {
+    attempts += 1;
+    const x = (rng() - 0.5) * 6.6;
+    const y = (rng() - 0.5) * 3.8;
+    const z = (rng() - 0.5) * 2.9;
+    let tooClose = false;
+    for (let k = 0; k < cloudCoords.length; k += 1) {
+      const [px, py, pz] = cloudCoords[k];
+      const d2 = (x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2;
+      if (d2 < MIN_DIST_3D_SQ) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) {
+      cloudCoords.push([x, y, z]);
+    }
+  }
+
+  // Fallback top-up if rare tight packing stops early
+  while (cloudCoords.length < PARTICLE_COUNT) {
+    cloudCoords.push([
+      (rng() - 0.5) * 6.6,
+      (rng() - 0.5) * 3.8,
+      (rng() - 0.5) * 2.9,
+    ]);
+  }
+
+  const nx = 11;
+  const ny = 4;
+  const nz = 3;
   const nodes: ParticleNode[] = [];
-  const nx = 6;
-  const ny = 5;
-  const nz = 8;
 
   for (let i = 0; i < PARTICLE_COUNT; i += 1) {
+    const [cx, cy, cz] = cloudCoords[i];
     const ix = i % nx;
     const iy = Math.floor(i / nx) % ny;
     const iz = Math.floor(i / (nx * ny)) % nz;
 
-    // Cloud coordinates: optical depth frustum scatter
-    const cx = (rng() - 0.5) * 3.1;
-    const cy = (rng() - 0.5) * 2.0;
-    const cz = (rng() - 0.5) * 2.7;
-
-    // Lattice coordinates: ordered 3D metric space with crisp jitter
-    const lx = ((ix / (nx - 1)) - 0.5) * 2.25 + (rng() - 0.5) * 0.08;
-    const ly = ((iy / (ny - 1)) - 0.5) * 1.55 + (rng() - 0.5) * 0.08;
-    const lz = ((iz / (nz - 1)) - 0.5) * 2.05 + (rng() - 0.5) * 0.08;
+    const lx = ((ix / (nx - 1)) - 0.5) * 5.2 + (rng() - 0.5) * 0.14;
+    const ly = ((iy / (ny - 1)) - 0.5) * 3.1 + (rng() - 0.5) * 0.14;
+    const lz = ((iz / (nz - 1)) - 0.5) * 2.4 + (rng() - 0.5) * 0.14;
 
     const paletteRoll = rng();
     const color =
-      paletteRoll < 0.46
+      paletteRoll < 0.40
         ? PALETTE[0]
         : paletteRoll < 0.72
         ? PALETTE[1]
-        : paletteRoll < 0.9
+        : paletteRoll < 0.90
         ? PALETTE[2]
         : PALETTE[3];
+
+    const shapeRoll = rng();
+    const variant: ParticleVariant =
+      shapeRoll < 0.10 ? 'cross' : shapeRoll < 0.40 ? 'ring' : 'dot';
 
     nodes.push({
       cx,
@@ -84,10 +120,11 @@ function buildParticles(): ParticleNode[] {
       lx,
       ly,
       lz,
-      radius: 1.25 + rng() * 1.45,
+      radius: 1.9 + rng() * 2.0,
       phase: rng() * Math.PI * 2,
       color,
-      layerBias: 0.65 + rng() * 0.8,
+      layerBias: 0.7 + rng() * 0.95,
+      variant,
     });
   }
   return nodes;
@@ -152,18 +189,18 @@ export const LandingParticleField: React.FC<LandingParticleFieldProps> = ({
         smoothProgress = 0.25;
         scrollVelocity = 0;
       } else {
-        const alphaP = 1 - Math.exp(-7.5 * dt);
+        const alphaP = 1 - Math.exp(-8.0 * dt);
         smoothProgress += (targetProgress - smoothProgress) * alphaP;
-        scrollVelocity *= Math.exp(-6.5 * dt);
+        scrollVelocity *= Math.exp(-6.2 * dt);
       }
 
       ctx.clearRect(0, 0, width, height);
 
       const morph = smoothBell(smoothProgress);
-      const rotY = smoothProgress * Math.PI * 1.65 + (reducedMotion ? 0 : elapsed * 0.045);
+      const rotY = smoothProgress * Math.PI * 1.9 + (reducedMotion ? 0 : elapsed * 0.042);
       const rotX =
         Math.sin(smoothProgress * Math.PI * 1.4) * 0.28 +
-        (reducedMotion ? 0 : Math.cos(elapsed * 0.14) * 0.04);
+        (reducedMotion ? 0 : Math.cos(elapsed * 0.14) * 0.035);
 
       const cosY = Math.cos(rotY);
       const sinY = Math.sin(rotY);
@@ -173,52 +210,63 @@ export const LandingParticleField: React.FC<LandingParticleFieldProps> = ({
       const fovScale = Math.min(width, height) * 0.72;
       const halfW = width * 0.5;
       const halfH = height * 0.5;
-      const cameraDist = 3.1;
-      const driftOffset = -(smoothProgress - 0.5) * height * 0.14 - scrollVelocity * 0.16;
+      const cameraDist = 3.2;
+      const driftOffset = -(smoothProgress - 0.5) * height * 0.24 - scrollVelocity * 0.26;
 
       let activeCount = 0;
       for (let i = 0; i < nodes.length; i += 1) {
         const n = nodes[i];
-        const idle = reducedMotion ? 0 : Math.sin(elapsed * 0.6 + n.phase) * 0.025;
+        const idle = reducedMotion ? 0 : Math.sin(elapsed * 0.55 + n.phase) * 0.025;
         const px = n.cx + (n.lx - n.cx) * morph + idle;
         const py = n.cy + (n.ly - n.cy) * morph;
         const pz = n.cz + (n.lz - n.cz) * morph;
 
-        // Rotate around Y then X
         const rx = px * cosY - pz * sinY;
         const rz1 = px * sinY + pz * cosY;
         const ry = py * cosX - rz1 * sinX;
         const rz = py * sinX + rz1 * cosX;
 
         const zCam = rz + cameraDist;
-        if (zCam <= 0.35) continue;
+        if (zCam <= 0.45) continue;
 
         const perspective = fovScale / zCam;
         const sx = halfW + rx * perspective;
         const sy = halfH + ry * perspective + driftOffset * n.layerBias;
 
-        if (sx < -40 || sx > width + 40 || sy < -40 || sy > height + 40) continue;
+        if (sx < -48 || sx > width + 48 || sy < -48 || sy > height + 48) continue;
 
-        const depthNorm = Math.min(Math.max((4.5 - zCam) / 2.8, 0), 1);
-        const alpha = 0.16 + depthNorm * 0.3;
-        const radius = Math.max(0.9, n.radius * (0.65 + depthNorm * 0.65));
+        const depthNorm = Math.min(Math.max((4.8 - zCam) / 2.9, 0), 1);
+        const centerDist = Math.abs(sx / Math.max(width, 1) - 0.5);
+        const corridorSoftener =
+          centerDist < 0.22 ? 0.52 + 0.48 * (centerDist / 0.22) : 1.0;
 
-        projected[activeCount++] = { sx, sy, alpha, radius, color: n.color };
+        const alpha = (0.38 + depthNorm * 0.38) * corridorSoftener;
+        const radius = Math.max(1.6, n.radius * (0.78 + depthNorm * 0.48));
+
+        projected[activeCount++] = {
+          sx,
+          sy,
+          alpha,
+          radius,
+          color: n.color,
+          variant: n.variant,
+        };
       }
 
-      // Draw crisp architectural constellation hairlines first
-      ctx.lineWidth = 0.65;
+      // Sparse architectural filaments only across medium distances (no dense clumps)
+      ctx.lineWidth = 0.85;
       for (let i = 0; i < activeCount; i += 1) {
         const a = projected[i];
         let links = 0;
-        for (let j = i + 1; j < activeCount && links < 3; j += 1) {
+        for (let j = i + 1; j < activeCount && links < 2; j += 1) {
           const b = projected[j];
           const dx = a.sx - b.sx;
           const dy = a.sy - b.sy;
           const d2 = dx * dx + dy * dy;
-          if (d2 < CONNECTION_DIST_SQ) {
-            const distFade = 1 - Math.sqrt(d2) / 88;
-            const lineAlpha = Math.min(0.13, distFade * Math.min(a.alpha, b.alpha) * 0.45);
+          if (d2 >= LINK_MIN_DIST_SQ && d2 <= LINK_MAX_DIST_SQ) {
+            const d = Math.sqrt(d2);
+            const distFade = 1 - (d - 52) / (148 - 52);
+            const lineAlpha = Math.min(0.22, Math.max(0.03, distFade * Math.min(a.alpha, b.alpha) * 0.42));
             const [r, g, bl] = a.color;
             ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${lineAlpha.toFixed(3)})`;
             ctx.beginPath();
@@ -230,14 +278,32 @@ export const LandingParticleField: React.FC<LandingParticleFieldProps> = ({
         }
       }
 
-      // Draw crisp particle nodes
+      // Crisp architectural particles: solid dots, hollow geometric rings, and optical crosshairs
       for (let i = 0; i < activeCount; i += 1) {
         const p = projected[i];
         const [r, g, b] = p.color;
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${p.alpha.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(p.sx, p.sy, p.radius, 0, Math.PI * 2);
-        ctx.fill();
+        if (p.variant === 'ring') {
+          ctx.lineWidth = 1.15;
+          ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${p.alpha.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(p.sx, p.sy, p.radius + 0.6, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (p.variant === 'cross') {
+          const arm = Math.max(3.5, p.radius + 1.8);
+          ctx.lineWidth = 1.15;
+          ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${p.alpha.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.moveTo(p.sx - arm, p.sy);
+          ctx.lineTo(p.sx + arm, p.sy);
+          ctx.moveTo(p.sx, p.sy - arm);
+          ctx.lineTo(p.sx, p.sy + arm);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${p.alpha.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(p.sx, p.sy, p.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     };
 
@@ -263,7 +329,7 @@ export const LandingParticleField: React.FC<LandingParticleFieldProps> = ({
 
     const onScroll = () => {
       const y = window.scrollY;
-      scrollVelocity = Math.max(-120, Math.min(120, scrollVelocity + (y - lastScrollY) * 0.45));
+      scrollVelocity = Math.max(-140, Math.min(140, scrollVelocity + (y - lastScrollY) * 0.55));
       lastScrollY = y;
       targetProgress = readScrollProgress();
       if (reducedMotion) drawFrame(performance.now());

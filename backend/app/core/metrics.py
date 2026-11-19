@@ -137,6 +137,7 @@ def evaluate_scene_predictions(
             "mIoU_BEV": 0.0,
             "ap_25": 0.0,
             "ap_50": 0.0,
+            "nds_static": 0.0,
             "ate_m": 0.0,
             "ase": 1.0 if n_gt > 0 else 0.0,
             "aoe_deg": 0.0,
@@ -144,6 +145,7 @@ def evaluate_scene_predictions(
             "matched_count": 0,
             "gt_count": n_gt,
             "pred_count": n_pred,
+            "depth_bins": [],
             "bootstrap_ci_95": {
                 "miou_3d_low": 0.0,
                 "miou_3d_high": 0.0,
@@ -231,6 +233,55 @@ def evaluate_scene_predictions(
     ap_25 = _compute_ap(pred_records, n_gt, 0.25)
     ap_50 = _compute_ap(pred_records, n_gt, 0.50)
 
+    # nuScenes static NDS composite (0.5*AP@0.25 + (1/6) * sum max(0, 1 - TP_err))
+    nds_static = round(
+        float(
+            np.clip(
+                0.5 * ap_25
+                + (1.0 / 6.0)
+                * (
+                    max(0.0, 1.0 - ate_m)
+                    + max(0.0, 1.0 - ase_mean)
+                    + max(0.0, 1.0 - math.radians(aoe_deg) / math.pi)
+                ),
+                0.0,
+                1.0,
+            )
+        ),
+        4,
+    )
+
+    # Omni3D-style range-bucket breakdown
+    gt_match_by_idx: dict[int, tuple[float, float]] = {}
+    for idx_r, idx_c in zip(row_ind.tolist(), col_ind.tolist()):
+        gt_match_by_idx[idx_c] = (
+            float(iou_matrix[idx_r, idx_c]),
+            float(np.linalg.norm(np.array(preds[idx_r]["box_3d"][:3]) - np.array(gts[idx_c]["box_3d"][:3]))),
+        )
+
+    depth_bins: list[dict[str, Any]] = []
+    for b_id, b_lbl, d_lo, d_hi in [
+        ("near_0_2m", "< 2.0 m", 0.0, 2.0),
+        ("mid_2_3.5m", "2.0–3.5 m", 2.0, 3.5),
+        ("far_3.5m_plus", "≥ 3.5 m", 3.5, float("inf")),
+    ]:
+        gt_indices = [
+            j for j, gt in enumerate(gts) if d_lo <= float(gt["box_3d"][1]) < d_hi
+        ]
+        matched_ious = [gt_match_by_idx[j][0] for j in gt_indices if j in gt_match_by_idx]
+        matched_ates = [gt_match_by_idx[j][1] for j in gt_indices if j in gt_match_by_idx]
+        gt_cnt = len(gt_indices)
+        depth_bins.append(
+            {
+                "bin": b_id,
+                "label": b_lbl,
+                "gt_count": gt_cnt,
+                "matched_count": len(matched_ious),
+                "mIoU_3D": round(float(sum(matched_ious) / gt_cnt), 4) if gt_cnt > 0 else 0.0,
+                "ate_m": round(float(np.mean(matched_ates)), 4) if matched_ates else 0.0,
+            }
+        )
+
     # Deterministic 1000-resample 95% bootstrap confidence intervals
     rng = np.random.default_rng(int(seed))
     iou_arr = np.array(ious_3d + [0.0] * (max(n_pred, n_gt) - matched_count), dtype=float)
@@ -249,6 +300,7 @@ def evaluate_scene_predictions(
         "mIoU_BEV": miou_bev,
         "ap_25": ap_25,
         "ap_50": ap_50,
+        "nds_static": nds_static,
         "ate_m": ate_m,
         "ase": ase_mean,
         "aoe_deg": aoe_deg,
@@ -256,6 +308,7 @@ def evaluate_scene_predictions(
         "matched_count": matched_count,
         "gt_count": n_gt,
         "pred_count": n_pred,
+        "depth_bins": depth_bins,
         "bootstrap_ci_95": {
             "miou_3d_low": float(miou_low),
             "miou_3d_high": float(miou_high),

@@ -1,13 +1,5 @@
 @import "tailwindcss";
 
-@font-face {
-  font-family: 'Athene';
-  src: url('/fonts/Athene.otf') format('opentype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
 :root {
   --bg-canvas: #F7F7F5;
   --bg-surface: #FFFFFF;
@@ -44,11 +36,11 @@
     scroll-padding-top: 4.5rem;
   }
 
-  .font-serif-editorial,
-  .font-display-athene {
-    font-family: 'Athene', 'Instrument Serif', Georgia, Cambria, serif;
-    font-weight: 400;
-    letter-spacing: -0.015em;
+  .font-serif-editorial {
+    font-family: 'Source Serif 4', Georgia, Cambria, 'Times New Roman', serif;
+    font-optical-sizing: auto;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
 
   .font-mono-tech {
@@ -260,8 +252,8 @@
     @keyframes curtain-up-reveal {
       from {
         opacity: 0;
-        transform: translateY(34px);
-        clip-path: inset(0 0 14% 0);
+        transform: translateY(42px);
+        clip-path: inset(0 0 16% 0);
       }
       to {
         opacity: 1;
@@ -282,33 +274,44 @@
     @keyframes slide-in-left {
       from {
         opacity: 0;
-        transform: translateX(-48px) translateY(18px);
+        transform: translateX(-110px) translateY(34px) scale(0.93);
       }
       to {
         opacity: 1;
-        transform: translateX(0) translateY(0);
+        transform: translateX(0) translateY(0) scale(1);
       }
     }
 
     @keyframes slide-in-right {
       from {
         opacity: 0;
-        transform: translateX(48px) translateY(18px);
+        transform: translateX(110px) translateY(34px) scale(0.93);
       }
       to {
         opacity: 1;
-        transform: translateX(0) translateY(0);
+        transform: translateX(0) translateY(0) scale(1);
       }
     }
 
-    @keyframes editorial-exit-soft {
+    @keyframes slide-out-left {
       from {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateX(0) translateY(0) scale(1);
       }
       to {
-        opacity: 0.42;
-        transform: translateY(-10px);
+        opacity: 0.14;
+        transform: translateX(-46px) translateY(-22px) scale(0.96);
+      }
+    }
+
+    @keyframes slide-out-right {
+      from {
+        opacity: 1;
+        transform: translateX(0) translateY(0) scale(1);
+      }
+      to {
+        opacity: 0.14;
+        transform: translateX(46px) translateY(-22px) scale(0.96);
       }
     }
 
@@ -316,13 +319,13 @@
       transform-origin: left center;
       animation: rule-draw-x linear both;
       animation-timeline: view();
-      animation-range: entry 0% cover 32%;
+      animation-range: entry 0% cover 36%;
     }
 
     .scroll-curtain-up {
       animation: curtain-up-reveal linear both;
       animation-timeline: view();
-      animation-range: entry 0% cover 34%;
+      animation-range: entry 0% cover 40%;
       backface-visibility: hidden;
     }
 
@@ -330,24 +333,24 @@
       transform-origin: left center;
       animation: bar-grow-x linear both;
       animation-timeline: view();
-      animation-range: entry 6% cover 42%;
+      animation-range: entry 8% cover 52%;
     }
 
     .scroll-enter-left {
       animation:
         slide-in-left linear backwards,
-        editorial-exit-soft linear forwards;
+        slide-out-left linear forwards;
       animation-timeline: view();
-      animation-range: entry 0% cover 38%, exit 55% exit 100%;
+      animation-range: entry 0% cover 46%, exit 10% exit 100%;
       backface-visibility: hidden;
     }
 
     .scroll-enter-right {
       animation:
         slide-in-right linear backwards,
-        editorial-exit-soft linear forwards;
+        slide-out-right linear forwards;
       animation-timeline: view();
-      animation-range: entry 0% cover 38%, exit 55% exit 100%;
+      animation-range: entry 0% cover 46%, exit 10% exit 100%;
       backface-visibility: hidden;
     }
 

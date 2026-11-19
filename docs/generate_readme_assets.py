@@ -33,7 +33,6 @@ BACKEND_DIR = REPO_ROOT / "backend"
 ASSETS_DIR = REPO_ROOT / "docs" / "assets"
 LIVE_JSON = ASSETS_DIR / "_live_photo_eval_results.json"
 CHROMIUM_BIN = "/usr/bin/chromium"
-ATHENE_OTF = REPO_ROOT / "frontend" / "public" / "fonts" / "Athene.otf"
 
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
@@ -156,8 +155,8 @@ def build_hero_banner_svg(miou_pct: float, ate_cm: float) -> None:
   <text x="614" y="34" text-anchor="end" font-family="JetBrains Mono, Liberation Mono, monospace" font-size="10.5" font-weight="600" letter-spacing="1.2" fill="#0F766E">MOGE-2 GPU + GEMINI v1</text>
   <line x1="44" y1="45" x2="614" y2="45" stroke="#111827" stroke-opacity="0.18" stroke-width="1"/>
 
-  <!-- Left editorial Athene-style serif display & typographic KPI ledger -->
-  <text x="44" y="114" font-family="Athene, Instrument Serif, Georgia, Liberation Serif, serif" font-size="56" font-weight="400" fill="#111827">MyLeenTo3</text>
+  <!-- Left editorial Source Serif 4 display & typographic KPI ledger -->
+  <text x="44" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="56" font-weight="500" fill="#111827">MyLeenTo3</text>
   <text x="44" y="148" font-family="Inter, Liberation Sans, sans-serif" font-size="16" font-weight="600" fill="#1D4ED8">Percepción Espacial 3D Monocular y Compuerta Adaptativa</text>
   <text x="44" y="176" font-family="Inter, Liberation Sans, sans-serif" font-size="13" fill="#4B5563">Nube métrica local (EXIF + MoGe-2 ViT-S + YOLOE), poses 9-DOF verificadas</text>
   <text x="44" y="195" font-family="Inter, Liberation Sans, sans-serif" font-size="13" fill="#4B5563">en Python y control adaptativo sin depender de hardware LiDAR.</text>
@@ -178,7 +177,7 @@ def build_hero_banner_svg(miou_pct: float, ate_cm: float) -> None:
     <line x1="436" y1="-10" x2="436" y2="36" stroke="#CBD5E1" stroke-width="1"/>
 
     <text x="452" y="0" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#4B5563">TESTS SUITE</text>
-    <text x="452" y="26" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#111827">42/42 OK</text>
+    <text x="452" y="26" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#111827">46/46 OK</text>
   </g>
 
   <!-- Right animated optical workbench panel -->
@@ -282,7 +281,7 @@ def build_cascade_gate_animated_svg() -> None:
   <!-- Node 1 -->
   <rect x="28" y="64" width="210" height="148" fill="#FFFFFF" stroke="#111827" stroke-opacity="0.2"/>
   <text x="44" y="88" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#4B5563">01 / ENTRADA</text>
-  <text x="44" y="114" font-family="Athene, Instrument Serif, Georgia, serif" font-size="22" fill="#111827">Foto RGB + EXIF</text>
+  <text x="44" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="22" fill="#111827">Foto RGB + EXIF</text>
   <line x1="44" y1="126" x2="220" y2="126" stroke="#E2E5EA"/>
   <text x="44" y="148" font-family="JetBrains Mono, monospace" font-size="10" fill="#4B5563">Focal 35mm / Transpose</text>
   <text x="44" y="168" font-family="JetBrains Mono, monospace" font-size="10" fill="#1D4ED8">FOV_h [25°..120°]</text>
@@ -295,7 +294,7 @@ def build_cascade_gate_animated_svg() -> None:
   <!-- Node 2 -->
   <rect x="294" y="64" width="256" height="148" fill="#FFFFFF" stroke="#1D4ED8" stroke-opacity="0.55" stroke-width="1.4"/>
   <text x="310" y="88" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#1D4ED8">02 / GPU RTX 3050</text>
-  <text x="310" y="114" font-family="Athene, Instrument Serif, Georgia, serif" font-size="22" fill="#111827">MoGe-2 + YOLOE-OV</text>
+  <text x="310" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="22" fill="#111827">MoGe-2 + YOLOE-OV</text>
   <line x1="310" y1="126" x2="532" y2="126" stroke="#E2E5EA"/>
   <text x="310" y="148" font-family="JetBrains Mono, monospace" font-size="10" fill="#111827">Nube métrica: 16,000 pts</text>
   <text x="310" y="168" font-family="JetBrains Mono, monospace" font-size="10" fill="#0F766E">Mapa profundidad + Máscaras</text>
@@ -308,7 +307,7 @@ def build_cascade_gate_animated_svg() -> None:
   <!-- Node 3 -->
   <rect x="606" y="64" width="256" height="148" fill="#FFFFFF" stroke="#111827" stroke-opacity="0.3"/>
   <text x="622" y="88" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#0F766E">03 / FISICA PYTHON</text>
-  <text x="622" y="114" font-family="Athene, Instrument Serif, Georgia, serif" font-size="22" fill="#111827">Motor Quiral 9-DOF</text>
+  <text x="622" y="114" font-family="Source Serif 4, Georgia, Liberation Serif, serif" font-size="22" fill="#111827">Motor Quiral 9-DOF</text>
   <line x1="622" y1="126" x2="844" y2="126" stroke="#E2E5EA"/>
   <text x="622" y="148" font-family="JetBrains Mono, monospace" font-size="10" fill="#111827">det(M) = +1.0 · Pinhole K</text>
   <text x="622" y="168" font-family="JetBrains Mono, monospace" font-size="10" fill="#4B5563">SAT 15-ejes · Kay-Kajiya</text>
@@ -341,8 +340,12 @@ def build_cascade_gate_animated_svg() -> None:
 
 def _load_ttf(size: int, bold: bool = False, serif: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     candidates: list[Path] = []
-    if serif and ATHENE_OTF.exists():
-        candidates.append(ATHENE_OTF)
+    if serif:
+        candidates.extend([
+            Path("/usr/share/fonts/liberation/LiberationSerif-Bold.ttf" if bold else "/usr/share/fonts/liberation/LiberationSerif-Regular.ttf"),
+            Path("/usr/share/fonts/TTF/DejaVuSerif-Bold.ttf" if bold else "/usr/share/fonts/TTF/DejaVuSerif.ttf"),
+            Path("/usr/share/fonts/droid/DroidSerif-Bold.ttf" if bold else "/usr/share/fonts/droid/DroidSerif-Regular.ttf"),
+        ])
     if bold:
         candidates.extend([
             Path("/usr/share/fonts/TTF/JetBrainsMono-Bold.ttf"),

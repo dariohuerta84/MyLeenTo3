@@ -486,6 +486,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
   onNavigate,
 }) => {
   const featured = benchmarks[0];
+  const rootRef = useRef<HTMLDivElement>(null);
   const storyRef = useRef<HTMLDivElement>(null);
   const stageBoxRef = useRef<HTMLDivElement>(null);
   const chapterRefs = useRef<Array<HTMLElement | null>>([null, null, null, null]);
@@ -568,6 +569,68 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
     };
   }, []);
 
+  // Universal bidirectional rAF fallback when CSS Scroll-Driven view() timelines are unsupported
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const cssSupported =
+      typeof CSS !== 'undefined' &&
+      typeof CSS.supports === 'function' &&
+      CSS.supports('(animation-timeline: view()) and (animation-range: entry)');
+    if (reducedMotion || cssSupported) return;
+
+    const els = Array.from(root.querySelectorAll<HTMLElement>('[data-scroll-anim]'));
+    if (els.length === 0) return;
+
+    let rafId = 0;
+    const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
+
+    const update = () => {
+      rafId = 0;
+      const vh = window.innerHeight || 900;
+      for (const el of els) {
+        const kind = el.dataset.scrollAnim;
+        const rect = el.getBoundingClientRect();
+        const entry = clamp01((vh - rect.top) / (vh * 0.46));
+        const exit = clamp01((-rect.top - rect.height * 0.1) / Math.max(rect.height * 0.9, 1));
+
+        if (kind === 'enter-left' || kind === 'enter-right') {
+          const sign = kind === 'enter-left' ? -1 : 1;
+          const xIn = sign * 110 * (1 - entry);
+          const yIn = 34 * (1 - entry);
+          const sIn = 0.93 + 0.07 * entry;
+          const xOut = sign * 46 * exit;
+          const yOut = -22 * exit;
+          const sOut = 1 - 0.04 * exit;
+          el.style.opacity = String(entry * (1 - 0.86 * exit));
+          el.style.transform = `translate3d(${(xIn + xOut).toFixed(1)}px, ${(yIn + yOut).toFixed(1)}px, 0) scale(${(sIn * sOut).toFixed(4)})`;
+        } else if (kind === 'curtain-up') {
+          el.style.opacity = String(entry);
+          el.style.transform = `translate3d(0, ${(42 * (1 - entry)).toFixed(1)}px, 0)`;
+        } else if (kind === 'rule-draw' || kind === 'bar-grow') {
+          el.style.transform = `scaleX(${entry.toFixed(4)})`;
+        }
+      }
+    };
+
+    const onScroll = () => {
+      if (!rafId) rafId = requestAnimationFrame(update);
+    };
+
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      for (const el of els) {
+        el.style.opacity = '';
+        el.style.transform = '';
+      }
+    };
+  }, [reducedMotion, benchmarks.length]);
+
   const jumpToChapter = (idx: number) => {
     const targetProgress = (idx + 0.35) / 4;
     scrollProgressRef.current = targetProgress;
@@ -589,7 +652,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
   };
 
   return (
-    <div className="relative bg-transparent text-[#111827]">
+    <div ref={rootRef} className="relative bg-transparent text-[#111827]">
       {/* Fixed 3D Particle Depth Field reactive across entire page scroll */}
       <LandingParticleField reducedMotion={reducedMotion} />
 
@@ -606,7 +669,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
 
           <div className="mt-10 grid items-center gap-12 lg:grid-cols-12">
             <div className="lg:col-span-6 space-y-6">
-              <h1 className="font-serif-editorial text-4xl leading-[1.03] text-[#111827] sm:text-5xl lg:text-[4.25rem]">
+              <h1 className="font-serif-editorial text-4xl font-medium leading-[1.06] text-[#111827] sm:text-5xl lg:text-[3.75rem]">
                 Convierte una foto 2D en geometría 3D auditable y sin LiDAR
               </h1>
 
@@ -735,30 +798,30 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         <section
           id="problematica-scroll"
           aria-label="Problemática principal antes de usar modelos 3D"
-          className="problem-scroll-section border-t border-[#111827]/15 bg-[#FFFFFF]/54 py-14 backdrop-blur-[1.5px] sm:py-18"
+          className="problem-scroll-section border-t border-[#111827]/15 bg-[#FFFFFF]/34 py-14 backdrop-blur-[1px] sm:py-18"
         >
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
             {/* Asymmetric Editorial Header */}
             <div className="grid items-end gap-6 pb-6 lg:grid-cols-12">
-              <div className="scroll-curtain-up lg:col-span-7">
+              <div data-scroll-anim="curtain-up" className="scroll-curtain-up lg:col-span-7">
                 <div className="font-mono-tech text-[11px] uppercase tracking-[0.16em] text-[#1D4ED8]">
                   La Problemática — De C8286 2D a 3D Métrico
                 </div>
-                <h2 className="font-serif-editorial mt-2 text-3xl leading-[1.06] text-[#111827] sm:text-5xl">
+                <h2 className="font-serif-editorial mt-2 text-3xl leading-[1.08] text-[#111827] sm:text-5xl">
                   Cuatro brechas que rompen la visión 2D y los modelos 3D sin control
                 </h2>
               </div>
-              <p className="scroll-curtain-up scroll-stagger-2 max-w-[54ch] text-sm leading-relaxed text-[#4B5563] lg:col-span-5">
+              <p data-scroll-anim="curtain-up" className="scroll-curtain-up scroll-stagger-2 max-w-[54ch] text-sm leading-relaxed text-[#4B5563] lg:col-span-5">
                 Antes de abrir el Laboratorio 3D, observa por qué no basta con dibujar cajas o invocar a ciegas una IA sobre una foto común: cada lámina contrapone la falla física frente a su verificación geométrica exacta.
               </p>
             </div>
-            <div className="scroll-rule-draw h-px w-full bg-[#111827]/20" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/20" />
 
             {/* SPREAD I: Text Left / Diagram Right */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <article className="scroll-enter-left lg:col-span-6 space-y-4 pr-0 lg:pr-8">
+              <article data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4 pr-0 lg:pr-8">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-5xl leading-none text-[#111827]/20">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
                     I
                   </span>
                   <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#BE123C]">
@@ -777,7 +840,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </article>
 
-              <div className="scroll-enter-right lg:col-span-6 border border-[#111827]/12 bg-[#FFFFFF]/72 p-4">
+              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 border border-[#111827]/15 bg-[#FFFFFF]/84 p-4">
                 <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha I: oclusión 2D vs rayos 3D Kay-Kajiya">
                   <rect x="4" y="4" width="212" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
                   <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#4B5563">FOTO 2D SIN PROFUNDIDAD</text>
@@ -802,11 +865,11 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </svg>
               </div>
             </div>
-            <div className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
 
             {/* SPREAD II: Diagram Left (Animated Scroll Bars) / Text Right */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <div className="scroll-enter-left order-2 border border-[#111827]/12 bg-[#FFFFFF]/72 p-6 lg:order-1 lg:col-span-6">
+              <div data-scroll-anim="enter-left" className="scroll-enter-left order-2 border border-[#111827]/15 bg-[#FFFFFF]/84 p-6 lg:order-1 lg:col-span-6">
                 <div className="font-mono-tech mb-5 text-[10px] font-semibold uppercase tracking-wider text-[#111827]">
                   Costo de Inferencia y Decisión Adaptativa
                 </div>
@@ -817,7 +880,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       <span className="font-mono-tech text-[#BE123C]">1,420 ms · costo alto</span>
                     </div>
                     <div className="mt-1.5 h-3 w-full bg-[#E5E7EB]">
-                      <div className="scroll-bar-grow h-full w-[88%] bg-[#BE123C]" />
+                      <div data-scroll-anim="bar-grow" className="scroll-bar-grow h-full w-[88%] bg-[#BE123C]" />
                     </div>
                   </div>
                   <div>
@@ -826,7 +889,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       <span className="font-mono-tech text-[#1D4ED8]">780 ms · −45% latencia</span>
                     </div>
                     <div className="mt-1.5 h-3 w-full bg-[#E5E7EB]">
-                      <div className="scroll-bar-grow h-full w-[54%] bg-[#1D4ED8]" />
+                      <div data-scroll-anim="bar-grow" className="scroll-bar-grow h-full w-[54%] bg-[#1D4ED8]" />
                     </div>
                   </div>
                   <div>
@@ -835,15 +898,15 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       <span className="font-mono-tech text-[#0F766E]">310–365 ms · −72% latencia</span>
                     </div>
                     <div className="mt-1.5 h-3 w-full bg-[#E5E7EB]">
-                      <div className="scroll-bar-grow h-full w-[26%] bg-[#0F766E]" />
+                      <div data-scroll-anim="bar-grow" className="scroll-bar-grow h-full w-[26%] bg-[#0F766E]" />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <article className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 pl-0 lg:pl-8">
+              <article data-scroll-anim="enter-right" className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 pl-0 lg:pl-8">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-5xl leading-none text-[#111827]/20">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
                     II
                   </span>
                   <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#B45309]">
@@ -862,13 +925,13 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </article>
             </div>
-            <div className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
 
             {/* SPREAD III: Text Left / Diagram Right */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <article className="scroll-enter-left lg:col-span-6 space-y-4 pr-0 lg:pr-8">
+              <article data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4 pr-0 lg:pr-8">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-5xl leading-none text-[#111827]/20">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
                     III
                   </span>
                   <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#BE123C]">
@@ -886,7 +949,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </article>
 
-              <div className="scroll-enter-right lg:col-span-6 border border-[#111827]/12 bg-[#FFFFFF]/72 p-4">
+              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 border border-[#111827]/15 bg-[#FFFFFF]/84 p-4">
                 <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha III: colisión SAT PVI y levitación GFI">
                   <rect x="4" y="4" width="218" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
                   <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#BE123C">COLISIÓN SÓLIDA SAT (PVI)</text>
@@ -907,11 +970,11 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </svg>
               </div>
             </div>
-            <div className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
 
             {/* SPREAD IV: Diagram Left / Text Right */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <div className="scroll-enter-left order-2 border border-[#111827]/12 bg-[#FFFFFF]/72 p-4 lg:order-1 lg:col-span-6">
+              <div data-scroll-anim="enter-left" className="scroll-enter-left order-2 border border-[#111827]/15 bg-[#FFFFFF]/84 p-4 lg:order-1 lg:col-span-6">
                 <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha IV: sensibilidad FOV y deriva multi-frame">
                   <rect x="4" y="4" width="222" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
                   <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#1D4ED8">DESCALIBRADO FOV_h (PINHOLE)</text>
@@ -935,9 +998,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </svg>
               </div>
 
-              <article className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 pl-0 lg:pl-8">
+              <article data-scroll-anim="enter-right" className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 pl-0 lg:pl-8">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-5xl leading-none text-[#111827]/20">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
                     IV
                   </span>
                   <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#1D4ED8]">
@@ -955,9 +1018,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </article>
             </div>
-            <div className="scroll-rule-draw h-px w-full bg-[#111827]/20" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/20" />
 
-            <div className="scroll-curtain-up mt-10 flex flex-wrap items-center justify-between gap-4">
+            <div data-scroll-anim="curtain-up" className="scroll-curtain-up mt-10 flex flex-wrap items-center justify-between gap-4">
               <span className="font-mono-tech text-xs text-[#4B5563]">
                 Reconstrucción local en vivo + 7 herramientas espaciales verificables
               </span>
@@ -986,11 +1049,11 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         <section
           id="scrolly-3d-story"
           ref={storyRef}
-          className="scrolly-narrative-scope border-t border-[#111827]/15 bg-[#F7F7F5]/48 py-16 backdrop-blur-[1px]"
+          className="scrolly-narrative-scope border-t border-[#111827]/15 bg-[#F7F7F5]/30 py-16 backdrop-blur-[1px]"
         >
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-6">
-              <div className="scroll-curtain-up max-w-2xl">
+              <div data-scroll-anim="curtain-up" className="scroll-curtain-up max-w-2xl">
                 <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#1D4ED8]">
                   Narrativa 3D Sincronizada al Scroll
                 </span>
@@ -1134,9 +1197,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </section>
 
         {/* 4. Universal Metrics Architectural Ledger (No Ground Truth) */}
-        <section className="border-t border-[#111827]/15 bg-[#FFFFFF]/58 py-16 backdrop-blur-[1.5px]">
+        <section className="border-t border-[#111827]/15 bg-[#FFFFFF]/36 py-16 backdrop-blur-[1px]">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
-            <div className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-5">
+            <div data-scroll-anim="curtain-up" className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-5">
               <div>
                 <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#0F766E]">
                   Diagnóstico Intrínseco Sin Referencia
@@ -1161,6 +1224,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 return (
                   <article
                     key={cap.code}
+                    data-scroll-anim="curtain-up"
                     className={`scroll-curtain-up ${stagger} border-t border-[#111827]/18 pt-4`}
                   >
                     <div
@@ -1183,10 +1247,10 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </section>
 
         {/* 5. C8286 Lineage & Rigor Index (Editorial Split, No Box Grid) */}
-        <section className="problem-scroll-section border-t border-[#111827]/15 bg-[#F7F7F5]/52 py-16 backdrop-blur-[1px]">
+        <section className="problem-scroll-section border-t border-[#111827]/15 bg-[#F7F7F5]/30 py-16 backdrop-blur-[1px]">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
             <div className="grid items-start gap-12 lg:grid-cols-12">
-              <div className="scroll-enter-left lg:col-span-6 space-y-4">
+              <div data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4">
                 <div className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#0F766E]">
                   Evolución Directa — De C8286 2D a MyLeenTo3
                 </div>
@@ -1209,7 +1273,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </div>
 
-              <div className="scroll-enter-right lg:col-span-6 divide-y divide-[#111827]/15 border-y border-[#111827]/15 bg-[#FFFFFF]/65 px-5 backdrop-blur-[1.5px]">
+              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 divide-y divide-[#111827]/15 border-y border-[#111827]/15 bg-[#FFFFFF]/80 px-5 backdrop-blur-[1.5px]">
                 <div className="py-5">
                   <div className="font-mono-tech text-[11px] uppercase tracking-wider text-[#1D4ED8]">
                     01 — Motor GPU Métrico Local (RTX 3050)
@@ -1251,9 +1315,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </section>
 
         {/* 6. Benchmarks Specimen Plates with View Transition Continuity */}
-        <section className="border-t border-[#111827]/15 bg-[#FFFFFF]/58 py-16 backdrop-blur-[1.5px]">
+        <section className="border-t border-[#111827]/15 bg-[#FFFFFF]/36 py-16 backdrop-blur-[1px]">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
-            <div className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-5">
+            <div data-scroll-anim="curtain-up" className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-5">
               <div>
                 <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#4B5563]">
                   Banco Reproducible — SEED = 42
@@ -1278,7 +1342,8 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 return (
                   <article
                     key={scene.id}
-                    className={`benchmark-card scroll-curtain-up ${stagger} group flex flex-col border border-[#111827]/15 bg-[#FFFFFF]/82 transition-colors hover:border-[#1D4ED8]`}
+                    data-scroll-anim="curtain-up"
+                    className={`benchmark-card scroll-curtain-up ${stagger} group flex flex-col border border-[#111827]/15 bg-[#FFFFFF]/86 transition-colors hover:border-[#1D4ED8]`}
                   >
                     <div className="benchmark-thumb aspect-[3/2] overflow-hidden border-b border-[#111827]/12 bg-[#F0F2F5]">
                       <img
