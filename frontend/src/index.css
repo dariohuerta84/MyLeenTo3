@@ -1,0 +1,185 @@
+@import "tailwindcss";
+
+:root {
+  --bg-canvas: #F7F7F5;
+  --bg-surface: #FFFFFF;
+  --bg-stage: #F0F2F5;
+  --border-hairline: #E2E5EA;
+  --grid-metric: #CBD5E1;
+  --ink-primary: #111827;
+  --ink-secondary: #4B5563;
+  --accent-cobalt: #1D4ED8;
+  --accent-emerald: #0F766E;
+  --accent-amber: #B45309;
+  --accent-crimson: #BE123C;
+}
+
+@layer base {
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background-color: var(--bg-canvas);
+    color: var(--ink-primary);
+    scroll-behavior: smooth;
+  }
+
+  .font-serif-editorial {
+    font-family: 'Instrument Serif', Georgia, Cambria, serif;
+  }
+
+  .font-mono-tech {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Native CSS Scroll-Driven Top Progress Bar */
+.scroll-progress-track {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.scroll-progress-bar {
+  width: 100%;
+  height: 100%;
+  background-color: var(--accent-cobalt);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+@supports (animation-timeline: scroll()) {
+  @keyframes scroll-progress-grow {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  .scroll-progress-bar {
+    animation: scroll-progress-grow linear both;
+    animation-timeline: scroll(root block);
+  }
+}
+
+/* Native CSS Scroll-Driven View Entry Reveals (Compositor-Only) */
+.reveal-on-scroll {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@supports ((animation-timeline: view()) and (animation-range: entry)) {
+  @keyframes editorial-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .reveal-on-scroll {
+    animation: editorial-reveal linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 26%;
+  }
+}
+
+/* View Transitions API spatial continuity */
+::view-transition-old(workspace-main),
+::view-transition-new(workspace-main) {
+  animation-duration: 210ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workspace-transition-region {
+  view-transition-name: workspace-main;
+}
+
+/* Off-screen WebGL pausing container */
+.webgl-stage-container {
+  content-visibility: auto;
+  contain-intrinsic-size: 640px 540px;
+}
+
+/* Scrollability affordance hints for overflow lists and tables */
+.scroll-affordance-y {
+  overflow-y: auto;
+  background:
+    linear-gradient(#ffffff 30%, rgba(255, 255, 255, 0)) center top,
+    linear-gradient(rgba(255, 255, 255, 0), #ffffff 70%) center bottom,
+    radial-gradient(farthest-side at 50% 0, rgba(17, 24, 39, 0.08), rgba(17, 24, 39, 0)) center top,
+    radial-gradient(farthest-side at 50% 100%, rgba(17, 24, 39, 0.08), rgba(17, 24, 39, 0)) center bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 24px, 100% 24px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.scroll-affordance-x {
+  overflow-x: auto;
+  background:
+    linear-gradient(90deg, #ffffff 30%, rgba(255, 255, 255, 0)) left center,
+    linear-gradient(90deg, rgba(255, 255, 255, 0), #ffffff 70%) right center,
+    radial-gradient(farthest-side at 0 50%, rgba(17, 24, 39, 0.08), rgba(17, 24, 39, 0)) left center,
+    radial-gradient(farthest-side at 100% 50%, rgba(17, 24, 39, 0.08), rgba(17, 24, 39, 0)) right center;
+  background-repeat: no-repeat;
+  background-size: 24px 100%, 24px 100%, 10px 100%, 10px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* Precision range sliders */
+input[type="range"].optical-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: #E2E5EA;
+  outline: none;
+}
+
+input[type="range"].optical-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #1D4ED8;
+  border: 2px solid #FFFFFF;
+  cursor: pointer;
+}
+
+input[type="range"].optical-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #1D4ED8;
+  border: 2px solid #FFFFFF;
+  cursor: pointer;
+}
+
+/* Respect reduced motion strictly */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .scroll-progress-bar,
+  .reveal-on-scroll {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.01ms !important;
+  }
+}

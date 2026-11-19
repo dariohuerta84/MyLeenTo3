@@ -1,0 +1,43 @@
+# ==============================================================================
+# MyLeenTo3 — Orquestación Dual-Service (Backend FastAPI + Frontend Nginx/Vite)
+# Uso:
+#   cp .env.example .env
+#   docker compose up --build
+# ==============================================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: myleento3-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_DEFAULT_MODEL=${GEMINI_DEFAULT_MODEL:-gemini-4-hydrogen}
+      - GEMINI_DEFAULT_THINKING_LEVEL=${GEMINI_DEFAULT_THINKING_LEVEL:-high}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+    container_name: myleento3-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
