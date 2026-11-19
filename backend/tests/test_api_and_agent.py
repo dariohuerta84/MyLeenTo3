@@ -132,6 +132,12 @@ def test_analyze_custom_image_offline_fallback(monkeypatch: pytest.MonkeyPatch) 
     assert "image_profile" in diag and "latent_metrics" in diag
     assert len(diag["per_object_diagnostics"]) == len(data["objects"])
     assert len(diag["exploited_weaknesses"]) >= 1
+    assert "cascade_policy" in diag
+    assert diag["cascade_policy"]["operational_verdict"] in {
+        "APROBADO",
+        "ESCALAR_MODELO",
+        "RECHAZADO_FISICA",
+    }
 
 
 def test_analyze_validation_errors() -> None:
@@ -390,6 +396,24 @@ def test_copilot_offline_all_six_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any(t["name"] == "run_fov_sensitivity_sweep" for t in d5["tool_trace"])
     assert any(a == {"type": "open_tab", "tab": "metrics"} for a in d5["scene_actions"])
 
+    # 6. Escalation policy & Physical Reliability Gate (C8286 lineage)
+    r6 = client.post(
+        "/api/copilot",
+        json={
+            "message": "¿Conviene escalar el modelo o es confiable la escena?",
+            "objects": objs,
+            "width": 960,
+            "height": 640,
+            "fov_h_deg": 60.0,
+        },
+    )
+    assert r6.status_code == 200
+    d6 = r6.json()
+    esc_traces = [t for t in d6["tool_trace"] if t["name"] == "evaluate_escalation_policy"]
+    assert len(esc_traces) == 1
+    assert esc_traces[0]["result"]["operational_verdict"] == "APROBADO"
+    assert "APROBADO" in d6["reply"]
+
 
 def test_copilot_live_multiturn_function_calling_loop() -> None:
     objs = _sample_objects()
@@ -476,7 +500,7 @@ def test_copilot_live_multiturn_function_calling_loop() -> None:
     assert call2_kw["previous_interaction_id"] == "int_turn_1"
     for kw in (call1_kw, call2_kw):
         assert kw["model"] == "gemini-4-hydrogen"
-        assert "tools" in kw and len(kw["tools"]) == 6
+        assert "tools" in kw and len(kw["tools"]) == 7
         assert "system_instruction" in kw
         assert kw["generation_config"]["thinking_level"] == "high"
 

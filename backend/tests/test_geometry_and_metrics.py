@@ -442,3 +442,48 @@ def test_intrinsic_diagnostics_photometric_stress_and_physical_anomalies() -> No
     empty_diag = compute_intrinsic_scene_diagnostics([], b64, 240, 160, 60.0)
     assert empty_diag["latent_metrics"]["physical_plausibility_score"] == 0.0
     assert len(empty_diag["per_object_diagnostics"]) == 0
+    assert empty_diag["cascade_policy"]["operational_verdict"] == "RECHAZADO_FISICA"
+    assert empty_diag["cascade_policy"]["recommended_tier"] == "REJECT_RECAPTURE_OR_SENSOR"
+
+
+def test_cascade_policy_c8286_verdicts() -> None:
+    # 1. Clean well-supported non-occluded scene -> APROBADO
+    clean_objs = [
+        {"id": "c1", "label": "desk_instrument", "box_3d": [-0.5, 2.2, -0.2, 0.4, 0.3, 0.3, 0.0, 0.0, 10.0]},
+        {"id": "c2", "label": "laptop", "box_3d": [0.45, 2.5, -0.2, 0.36, 0.28, 0.22, 0.0, 0.0, -12.0]},
+    ]
+    clean_diag = compute_intrinsic_scene_diagnostics(clean_objs, None, 960, 640, 60.0)
+    cp_clean = clean_diag["cascade_policy"]
+    assert cp_clean["operational_verdict"] == "APROBADO"
+    assert cp_clean["c8286_degradation_regime"] == "clean"
+    assert cp_clean["recommended_tier"] == "VLM_3D_FAST_TIER"
+    assert cp_clean["estimated_latency_savings_pct"] > 0.0
+    assert cp_clean["min_surface_clearance_m"] > 0.0
+
+    # 2. Occlusion corridor benchmark -> ESCALAR_MODELO (occlusion_bg)
+    corridor = get_benchmark("occlusion_corridor")
+    corr_objs = corridor["demo_predictions_by_model"]["gemini-4-hydrogen"]["objects"]
+    corr_diag = compute_intrinsic_scene_diagnostics(
+        corr_objs,
+        corridor["image_base64"],
+        corridor["width"],
+        corridor["height"],
+        corridor["fov_h_deg"],
+    )
+    cp_corr = corr_diag["cascade_policy"]
+    assert cp_corr["operational_verdict"] == "ESCALAR_MODELO"
+    assert cp_corr["c8286_degradation_regime"] == "occlusion_bg"
+    assert cp_corr["recommended_model"] == "gemini-4-hydrogen"
+    assert cp_corr["occlusion_pairs_count"] >= 1
+
+    # 3. Severe solid interpenetration & levitation -> RECHAZADO_FISICA
+    broken_objs = [
+        {"id": "b1", "label": "base_crate", "box_3d": [0.0, 2.5, -0.4, 0.8, 0.8, 0.8, 0.0, 0.0, 0.0]},
+        {"id": "b2", "label": "penetrating_crate", "box_3d": [0.05, 2.52, -0.35, 0.8, 0.8, 0.8, 0.0, 0.0, 5.0]},
+        {"id": "b3", "label": "floating_crate", "box_3d": [1.0, 3.0, 1.4, 0.5, 0.5, 0.5, 25.0, -15.0, 10.0]},
+    ]
+    broken_diag = compute_intrinsic_scene_diagnostics(broken_objs, None, 960, 640, 60.0)
+    cp_broken = broken_diag["cascade_policy"]
+    assert cp_broken["operational_verdict"] == "RECHAZADO_FISICA"
+    assert cp_broken["recommended_tier"] == "REJECT_RECAPTURE_OR_SENSOR"
+    assert cp_broken["colliding_pairs_count"] >= 1

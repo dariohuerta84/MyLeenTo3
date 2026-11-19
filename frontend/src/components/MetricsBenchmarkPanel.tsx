@@ -21,6 +21,7 @@ import {
   Layers,
   Loader2,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import type {
   CompareModelsResponse,
@@ -99,6 +100,7 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
     [];
   const latent = intrinsicDiagnostics?.latent_metrics;
   const imgProf = intrinsicDiagnostics?.image_profile;
+  const cascadePolicy = intrinsicDiagnostics?.cascade_policy;
   const exploitedWeaknesses = intrinsicDiagnostics?.exploited_weaknesses ?? [];
   const perObjectDiag = intrinsicDiagnostics?.per_object_diagnostics ?? [];
 
@@ -296,6 +298,98 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
         <div className="rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-5 text-xs text-[#4B5563]">
           Analiza una escena en el Laboratorio 3D para calcular métricas intrínsecas y de coherencia geométrica.
         </div>
+      )}
+
+      {/* Compuerta de Escalamiento Adaptativo Edge -> 3D (Evolución de C8286) */}
+      {cascadePolicy && (
+        <section className="space-y-3 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E2E5EA] pb-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-[#1D4ED8]" />
+              <div>
+                <h2 className="text-sm font-semibold text-[#111827]">
+                  Compuerta de Escalamiento Adaptativo Edge → 3D (Evolución de C8286)
+                </h2>
+                <p className="text-xs text-[#4B5563]">
+                  Extiende las cascadas costo–precisión 2D (HSV/LBP/HOG vs. MobileNetV2 INT8) para decidir cuándo basta un tier rápido y cuándo escalar a razonamiento 3D profundo.
+                </p>
+              </div>
+            </div>
+
+            {(() => {
+              const badgeCls =
+                cascadePolicy.operational_verdict === 'APROBADO'
+                  ? 'border-[#0F766E]/35 bg-[#0F766E]/10 text-[#0F766E]'
+                  : cascadePolicy.operational_verdict === 'ESCALAR_MODELO'
+                  ? 'border-[#B45309]/35 bg-[#B45309]/10 text-[#B45309]'
+                  : 'border-[#BE123C]/35 bg-[#BE123C]/10 text-[#BE123C]';
+              return (
+                <span
+                  className={`font-mono-tech rounded-md border px-3 py-1 text-xs font-semibold ${badgeCls}`}
+                >
+                  {cascadePolicy.operational_verdict}
+                </span>
+              );
+            })()}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] p-3">
+              <div className="text-[11px] text-[#4B5563]">Régimen Visual C8286</div>
+              <div className="font-mono-tech mt-1 text-sm font-semibold text-[#111827]">
+                {cascadePolicy.c8286_degradation_regime}
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                {cascadePolicy.occlusion_pairs_count} oclusiones · {cascadePolicy.colliding_pairs_count} colisiones
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] p-3">
+              <div className="text-[11px] text-[#4B5563]">Tier &amp; Modelo Recomendado</div>
+              <div className="font-mono-tech mt-1 text-sm font-semibold text-[#1D4ED8]">
+                {cascadePolicy.recommended_model}
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                {cascadePolicy.recommended_tier}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] p-3">
+              <div className="text-[11px] text-[#4B5563]">Ahorro Estimado de Latencia</div>
+              <div className="font-mono-tech mt-1 text-sm font-semibold text-[#0F766E]">
+                {cascadePolicy.estimated_latency_savings_pct > 0
+                  ? `−${cascadePolicy.estimated_latency_savings_pct.toFixed(0)}% vs. Deep Tier`
+                  : '0% (Escalado completo)'}
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                Prioridad: confiabilidad física
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] p-3">
+              <div className="text-[11px] text-[#4B5563]">Holgura Mínima de Paso</div>
+              <div className="font-mono-tech mt-1 text-sm font-semibold text-[#111827]">
+                {cascadePolicy.min_surface_clearance_m !== null
+                  ? formatMeters(cascadePolicy.min_surface_clearance_m, 3)
+                  : 'N/A (< 2 obj)'}
+              </div>
+              <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
+                Distancia superficie-a-superficie
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] p-3 text-xs">
+            <div className="font-semibold text-[#111827]">{cascadePolicy.summary}</div>
+            {cascadePolicy.trigger_reasons.length > 0 && (
+              <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] text-[#4B5563]">
+                {cascadePolicy.trigger_reasons.map((reason, i) => (
+                  <li key={i}>{reason}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
       )}
 
       {/* Universal Reference-Free Latent Diagnostics & Photometric Vulnerability Section */}

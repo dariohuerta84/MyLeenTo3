@@ -179,6 +179,7 @@ export interface CopilotPayload {
   message: string;
   objects: SpatialObject[];
   gt_objects?: SpatialObject[] | null;
+  image_base64?: string;
   width: number;
   height: number;
   fov_h_deg: number;

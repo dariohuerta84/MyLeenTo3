@@ -20,6 +20,7 @@ from PIL import Image
 from .geometry_3d import (
     compute_3d_iou,
     compute_occlusion_matrix,
+    compute_pairwise_geometry,
     obb_corners_gemini,
     project_obb_to_2d,
 )
@@ -266,6 +267,194 @@ def _weakness_label_for_object(
     return "Estable"
 
 
+def _compute_cascade_policy(
+    *,
+    objects: list[dict[str, Any]],
+    image_profile: dict[str, Any],
+    occlusion_matrix: list[dict[str, Any]],
+    colliding_pairs: int,
+    plausibility: float,
+    pvi: float,
+    gfi: float,
+    sdas: float,
+    fbr: float,
+    ofi: float,
+) -> dict[str, Any]:
+    """Classify scene stress in C8286 regimes and emit deterministic Edge -> 3D escalation gate."""
+    n = len(objects)
+    occ_count = len(occlusion_matrix)
+    max_occ = max((float(e.get("occlusion_ratio", 0.0)) for e in occlusion_matrix), default=0.0)
+    max_abs_yaw_deg = max((abs(float(o["box_3d"][8])) for o in objects), default=0.0)
+
+    min_clearance: Optional[float] = None
+    if n >= 2:
+        clearances = [
+            compute_pairwise_geometry(objects[i]["box_3d"], objects[j]["box_3d"])["surface_clearance_m"]
+            for i in range(n)
+            for j in range(i + 1, n)
+        ]
+        if clearances:
+            min_clearance = round(float(min(clearances)), 3)
+
+    dark_ratio = float(image_profile.get("dark_shadow_ratio", 0.0))
+    bloom_ratio = float(image_profile.get("bloom_saturation_ratio", 0.0))
+    lum_mean = float(image_profile.get("luminance_mean", 0.5))
+
+    # Separate real underexposure/localized glare from uniform bright studio backdrops
+    is_illum_stress = (
+        dark_ratio > 0.30
+        or lum_mean < 0.28
+        or (bloom_ratio > 0.035 and (dark_ratio >= 0.05 or lum_mean <= 0.70))
+    )
+    # Threshold >= 0.35 ray occlusion corresponds to heavy partial occlusion (>1/3 of target rays)
+    is_occ_stress = (occ_count >= 1 and max_occ >= 0.35) or (fbr >= 0.25)
+
+    if is_illum_stress and is_occ_stress:
+        regime = "hybrid_stress"
+    elif is_occ_stress:
+        regime = "occlusion_bg"
+    elif is_illum_stress:
+        regime = "illumination_noise"
+    else:
+        regime = "clean"
+
+    reasons: list[str] = []
+
+    if n == 0:
+        reasons.append(
+            "Sin detecciones 3D activas (0 objetos); la compuerta impide inferir distancias sin respaldo."
+        )
+        return {
+            "operational_verdict": "RECHAZADO_FISICA",
+            "recommended_tier": "REJECT_RECAPTURE_OR_SENSOR",
+            "recommended_model": "none",
+            "c8286_degradation_regime": regime,
+            "estimated_latency_savings_pct": 0.0,
+            "min_surface_clearance_m": None,
+            "occlusion_pairs_count": 0,
+            "colliding_pairs_count": 0,
+            "trigger_reasons": reasons,
+            "summary": "Compuerta RECHAZADA: 0 objetos 3D detectados; requiere re-captura o verificación manual.",
+        }
+
+    # Gate 1: Reject when hard physical violations or extreme dark-range uncertainty break plausibility
+    if pvi >= 0.08 or gfi >= 0.55 or plausibility < 45.0 or (is_illum_stress and ofi >= 0.55):
+        if pvi >= 0.08:
+            reasons.append(
+                f"Interpenetración volumétrica severa SAT (PVI {pvi * 100:.1f}% >= 8.0%, {colliding_pairs} colisiones)."
+            )
+        if gfi >= 0.55:
+            reasons.append(
+                f"Levitación/hundimiento severo respecto al plano de soporte (GFI {gfi:.2f} m >= 0.55 m)."
+            )
+        if plausibility < 45.0:
+            reasons.append(
+                f"Plausibilidad física insuficiente ({plausibility:.1f}/100 < 45.0) para operar sin sensor 3D."
+            )
+        if is_illum_stress and ofi >= 0.55:
+            reasons.append(
+                f"Estrés fotométrico ({regime}) combinado con alta incertidumbre de rango (±{ofi:.2f} m >= 0.55 m)."
+            )
+        return {
+            "operational_verdict": "RECHAZADO_FISICA",
+            "recommended_tier": "REJECT_RECAPTURE_OR_SENSOR",
+            "recommended_model": "gemini-4-hydrogen",
+            "c8286_degradation_regime": regime,
+            "estimated_latency_savings_pct": 0.0,
+            "min_surface_clearance_m": min_clearance,
+            "occlusion_pairs_count": occ_count,
+            "colliding_pairs_count": colliding_pairs,
+            "trigger_reasons": reasons,
+            "summary": (
+                f"Compuerta RECHAZADA por inconsistencia física severa ({reasons[0]}). "
+                "Se recomienda nueva captura o validación LiDAR antes de actuar."
+            ),
+        }
+
+    # Gate 2: Escalate to deep VLM reasoning when visual/geometric complexity exceeds Edge/Fast ceiling
+    if (
+        is_occ_stress
+        or is_illum_stress
+        or pvi > 0.01
+        or gfi >= 0.30
+        or ofi >= 0.35
+        or sdas >= 0.62
+        or plausibility < 68.0
+        or max_abs_yaw_deg >= 45.0
+    ):
+        if is_occ_stress:
+            reasons.append(
+                f"Oclusión severa detectada ({occ_count} pares, máx. {max_occ * 100:.0f}% rayos bloqueados): "
+                "supera el techo de robustez 2D de C8286 (F1=0.715) y exige razonamiento 3D profundo."
+            )
+        if max_abs_yaw_deg >= 45.0:
+            reasons.append(
+                f"Rotación 3D marcada (|yaw| máx. = {max_abs_yaw_deg:.1f}° >= 45°): requiere desambiguación completa 9-DOF."
+            )
+        if is_illum_stress:
+            reasons.append(
+                f"Degradación fotométrica activa (sombras {dark_ratio * 100:.0f}%, lum. {lum_mean:.2f}): "
+                "los descriptores clásicos 2D colapsan y el tier rápido pierde anclas de escala."
+            )
+        if ofi >= 0.35:
+            reasons.append(
+                f"Incertidumbre cuadrática de rango elevada (±σ_y = {ofi:.2f} m >= 0.35 m)."
+            )
+        if pvi > 0.01 or gfi >= 0.30:
+            reasons.append(
+                f"Tensión geométrica moderada (PVI {pvi * 100:.1f}%, GFI {gfi:.2f} m): requiere verificación profunda."
+            )
+        if sdas >= 0.62 or plausibility < 68.0:
+            reasons.append(
+                f"Ambigüedad escala–profundidad (SDAS {sdas:.2f}) o plausibilidad intermedia ({plausibility:.1f}/100)."
+            )
+        return {
+            "operational_verdict": "ESCALAR_MODELO",
+            "recommended_tier": "VLM_3D_DEEP_REASONING",
+            "recommended_model": "gemini-4-hydrogen",
+            "c8286_degradation_regime": regime,
+            "estimated_latency_savings_pct": 0.0,
+            "min_surface_clearance_m": min_clearance,
+            "occlusion_pairs_count": occ_count,
+            "colliding_pairs_count": colliding_pairs,
+            "trigger_reasons": reasons,
+            "summary": (
+                f"Escalar a gemini-4-hydrogen (régimen C8286 '{regime}'): {reasons[0]}"
+            ),
+        }
+
+    # Gate 3: Clean geometry & lighting -> safe for cost-aware fast/balanced 3D inference
+    if plausibility >= 75.0 and n <= 5 and max_occ < 0.15 and max_abs_yaw_deg < 25.0:
+        rec_model = "gemini-3.5-flash-lite"
+        savings = 72.0
+        reasons.append(
+            f"Régimen limpio (C8286 'clean'), sin oclusiones críticas ({max_occ * 100:.0f}%) ni colisiones SAT y alta plausibilidad ({plausibility:.1f}/100)."
+        )
+    else:
+        rec_model = "gemini-4-argon"
+        savings = 45.0
+        reasons.append(
+            f"Escena estable (plausibilidad {plausibility:.1f}/100, PVI {pvi * 100:.1f}%, ±σ_y={ofi:.2f} m) "
+            "con orientación u oclusión leve: el nivel intermedio preserva precisión reduciendo latencia."
+        )
+
+    return {
+        "operational_verdict": "APROBADO",
+        "recommended_tier": "VLM_3D_FAST_TIER",
+        "recommended_model": rec_model,
+        "c8286_degradation_regime": regime,
+        "estimated_latency_savings_pct": savings,
+        "min_surface_clearance_m": min_clearance,
+        "occlusion_pairs_count": occ_count,
+        "colliding_pairs_count": colliding_pairs,
+        "trigger_reasons": reasons,
+        "summary": (
+            f"Compuerta APROBADA en tier rápido ({rec_model}, -{savings:.0f}% latencia estimada vs. modelo profundo): "
+            f"sin colisiones 3D ni estrés fotométrico crítico."
+        ),
+    }
+
+
 def compute_intrinsic_scene_diagnostics(
     objects: list[dict[str, Any]],
     image_base64: Optional[str],
@@ -298,6 +487,18 @@ def compute_intrinsic_scene_diagnostics(
             }
             for fov in DEFAULT_FOV_SWEEP_VALUES
         ]
+        empty_policy = _compute_cascade_policy(
+            objects=objects,
+            image_profile=image_profile,
+            occlusion_matrix=occlusion_matrix,
+            colliding_pairs=0,
+            plausibility=0.0,
+            pvi=0.0,
+            gfi=0.0,
+            sdas=0.0,
+            fbr=0.0,
+            ofi=0.0,
+        )
         return {
             "image_profile": image_profile,
             "latent_metrics": {
@@ -322,6 +523,7 @@ def compute_intrinsic_scene_diagnostics(
             ],
             "reference_free_fov_sweep": empty_sweep,
             "estimated_optimal_fov_h_deg": int(round(fov_h_deg)),
+            "cascade_policy": empty_policy,
         }
 
     # Precompute bottom faces for latent support plane
@@ -607,6 +809,19 @@ def compute_intrinsic_scene_diagnostics(
             }
         )
 
+    cascade_policy = _compute_cascade_policy(
+        objects=objects,
+        image_profile=image_profile,
+        occlusion_matrix=occlusion_matrix,
+        colliding_pairs=colliding_pairs,
+        plausibility=plausibility,
+        pvi=pvi,
+        gfi=gfi,
+        sdas=sdas,
+        fbr=fbr,
+        ofi=ofi,
+    )
+
     return {
         "image_profile": image_profile,
         "latent_metrics": latent_metrics,
@@ -614,6 +829,7 @@ def compute_intrinsic_scene_diagnostics(
         "exploited_weaknesses": weaknesses[:5],
         "reference_free_fov_sweep": ref_sweep,
         "estimated_optimal_fov_h_deg": int(best_fov_pt["fov_h_deg"]),
+        "cascade_policy": cascade_policy,
     }
 
 

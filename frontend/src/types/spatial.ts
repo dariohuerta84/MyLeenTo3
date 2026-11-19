@@ -148,6 +148,19 @@ export interface ExploitedWeaknessEntry {
   explanation: string;
 }
 
+export interface CascadePolicy {
+  operational_verdict: 'APROBADO' | 'ESCALAR_MODELO' | 'RECHAZADO_FISICA' | string;
+  recommended_tier: string;
+  recommended_model: string;
+  c8286_degradation_regime: 'clean' | 'occlusion_bg' | 'illumination_noise' | 'hybrid_stress' | string;
+  estimated_latency_savings_pct: number;
+  min_surface_clearance_m: number | null;
+  occlusion_pairs_count: number;
+  colliding_pairs_count: number;
+  trigger_reasons: string[];
+  summary: string;
+}
+
 export interface IntrinsicDiagnostics {
   image_profile: ImagePhotometricProfile;
   latent_metrics: LatentIntrinsicMetrics;
@@ -155,6 +168,7 @@ export interface IntrinsicDiagnostics {
   exploited_weaknesses: ExploitedWeaknessEntry[];
   reference_free_fov_sweep: FovSweepPoint[];
   estimated_optimal_fov_h_deg: number;
+  cascade_policy?: CascadePolicy;
 }
 
 export interface BenchmarkScene {

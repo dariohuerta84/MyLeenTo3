@@ -241,6 +241,7 @@ class CopilotRequest(BaseModel):
     message: str = Field(..., min_length=1)
     objects: list[ObjectInput] = Field(default_factory=list)
     gt_objects: Optional[list[ObjectInput]] = None
+    image_base64: Optional[str] = None
     width: int = Field(default=960, gt=0)
     height: int = Field(default=640, gt=0)
     fov_h_deg: float = Field(default=60.0, ge=20.0, le=140.0)

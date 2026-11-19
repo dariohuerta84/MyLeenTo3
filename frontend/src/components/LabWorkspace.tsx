@@ -7,6 +7,7 @@ import {
   Play,
   Ruler,
   ScanLine,
+  ShieldCheck,
   Upload,
   X,
 } from 'lucide-react';
@@ -14,6 +15,7 @@ import type {
   BenchmarkScene,
   CameraViewMode,
   GeminiModelId,
+  IntrinsicDiagnostics,
   MeasurementState,
   OcclusionEntry,
   SceneAction,
@@ -47,6 +49,7 @@ interface LabWorkspaceProps {
   gtObjects?: SpatialObject[] | null;
   occlusionMatrix: OcclusionEntry[];
   metrics?: SceneMetrics | null;
+  intrinsicDiagnostics?: IntrinsicDiagnostics | null;
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   highlightedIds: string[] | null;
@@ -93,6 +96,7 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   gtObjects,
   occlusionMatrix,
   metrics,
+  intrinsicDiagnostics,
   selectedObjectId,
   hoveredObjectId,
   highlightedIds,
@@ -382,6 +386,68 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
         )}
       </section>
 
+      {/* Compuerta Edge -> 3D (Herencia C8286) Strip */}
+      {intrinsicDiagnostics?.cascade_policy && (
+        <section
+          aria-label="Compuerta de confiabilidad Edge a VLM 3D"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E2E5EA] bg-[#FFFFFF] px-4 py-2.5 text-xs"
+        >
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-[#111827]">
+              <ShieldCheck className="h-3.5 w-3.5 text-[#1D4ED8]" />
+              <span>Compuerta Edge → 3D (Herencia C8286):</span>
+            </span>
+
+            {(() => {
+              const cp = intrinsicDiagnostics.cascade_policy;
+              const verdictStyle =
+                cp.operational_verdict === 'APROBADO'
+                  ? 'border-[#0F766E]/35 bg-[#0F766E]/10 text-[#0F766E]'
+                  : cp.operational_verdict === 'ESCALAR_MODELO'
+                  ? 'border-[#B45309]/35 bg-[#B45309]/10 text-[#B45309]'
+                  : 'border-[#BE123C]/35 bg-[#BE123C]/10 text-[#BE123C]';
+              const verdictLabel =
+                cp.operational_verdict === 'APROBADO'
+                  ? 'APROBADO'
+                  : cp.operational_verdict === 'ESCALAR_MODELO'
+                  ? 'ESCALAR MODELO'
+                  : 'RECHAZADO FÍSICA';
+              return (
+                <>
+                  <span
+                    className={`font-mono-tech rounded border px-2 py-0.5 text-[11px] font-semibold ${verdictStyle}`}
+                  >
+                    {verdictLabel}
+                  </span>
+                  <span className="font-mono-tech rounded border border-[#E2E5EA] bg-[#F7F7F5] px-2 py-0.5 text-[11px] text-[#111827]">
+                    Régimen: {cp.c8286_degradation_regime}
+                  </span>
+                  <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                    Tier: <strong className="text-[#111827]">{cp.recommended_model}</strong>
+                    {cp.estimated_latency_savings_pct > 0
+                      ? ` (−${cp.estimated_latency_savings_pct.toFixed(0)}% latencia)`
+                      : cp.operational_verdict === 'ESCALAR_MODELO'
+                      ? ' (Razonamiento Profundo)'
+                      : ' (Re-captura / Sensor)'}
+                  </span>
+                  {cp.min_surface_clearance_m !== null && (
+                    <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                      Holgura mín: <strong className="text-[#111827]">{cp.min_surface_clearance_m.toFixed(2)} m</strong>
+                    </span>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+
+          {intrinsicDiagnostics.cascade_policy.trigger_reasons[0] && (
+            <p className="max-w-2xl text-[11px] text-[#4B5563]">
+              {intrinsicDiagnostics.cascade_policy.trigger_reasons[0]}
+            </p>
+          )}
+        </section>
+      )}
+
       {/* Main Synchronized 2D <-> 3D Split */}
       <div className="grid gap-4 lg:grid-cols-12">
         <div className="lg:col-span-5">
@@ -552,6 +618,7 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
           <SpatialCopilotPanel
             objects={objects}
             gtObjects={gtObjects}
+            imageBase64={imageBase64}
             width={width}
             height={height}
             fovHDeg={fovHDeg}

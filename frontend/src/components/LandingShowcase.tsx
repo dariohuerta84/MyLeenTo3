@@ -616,17 +616,15 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
           <div className="lg:col-span-6 space-y-6">
             <div className="inline-flex items-center gap-2 rounded-full border border-[#E2E5EA] bg-[#FFFFFF] px-3 py-1 text-xs text-[#4B5563]">
               <span className="h-2 w-2 rounded-full bg-[#0F766E]" />
-              <span>Visión Computacional 3D · Google AI Studio + Three.js</span>
+              <span>De Cascadas 2D Edge (C8286) a Percepción 3D Monocular · Sin LiDAR</span>
             </div>
 
             <h1 className="font-serif-editorial text-4xl leading-[1.05] tracking-tight text-[#111827] sm:text-5xl lg:text-[3.75rem]">
-              Convierte cualquier foto 2D en un espacio 3D medible en metros.
+              Convierte una foto 2D en geometría 3D confiable y con control adaptativo de costo.
             </h1>
 
             <p className="max-w-[60ch] text-base leading-relaxed text-[#4B5563]">
-              <strong>MyLeenTo3</strong> conecta la visión multimodal de Gemini con geometría
-              óptica exacta en Python: reconstruye objetos en 3D, mide distancias reales sin
-              alucinaciones y audita debilidades ocultas incluso en fotos sin sensores LiDAR.
+              <strong>MyLeenTo3</strong> extiende el análisis costo–precisión de visión 2D hacia la comprensión espacial 3D sin LiDAR: reconstruye poses 9-DOF en metros con <strong>Google AI Studio</strong>, decide en qué escenas basta un nivel rápido o cuándo escalar a razonamiento profundo y bloquea alucinaciones físicas en Python.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -997,14 +995,40 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
               <div className="flex items-center gap-2 text-[#B45309]">
                 <Ruler className="h-4 w-4" />
                 <h3 className="text-sm font-semibold text-[#111827]">
-                  Copiloto con Function Calling
+                  Copiloto &amp; Compuerta (7 Funciones)
                 </h3>
               </div>
               <p className="mt-2.5 text-xs leading-relaxed text-[#4B5563]">
-                6 herramientas auditables controlan la cámara 3D, trazan reglas entre objetos y
-                exponen qué bloquea a qué en tiempo real.
+                7 herramientas auditables en Python controlan la cámara 3D, trazan reglas entre
+                objetos, auditan oclusiones y dictaminan el escalamiento Edge → VLM.
               </p>
             </article>
+          </div>
+
+          {/* Lineage card tracing directly from C8286 Parallel Computing 2D benchmark */}
+          <div className="mt-8 rounded-xl border border-[#E2E5EA] bg-[#F7F7F5] p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-3xl space-y-2">
+                <div className="font-mono-tech text-[11px] font-semibold uppercase tracking-wider text-[#0F766E]">
+                  Evolución Directa de Investigación: C8286 (2D Edge) → MyLeenTo3 (3D Monocular)
+                </div>
+                <h3 className="text-base font-semibold text-[#111827]">
+                  Por qué nace MyLeenTo3 tras comparar Visión Clásica Paralela vs. CNNs
+                </h3>
+                <p className="text-xs leading-relaxed text-[#4B5563]">
+                  En el proyecto previo de Computación Paralela (<span className="font-mono-tech text-[#111827]">C8286</span>), comprobamos que los descriptores 2D clásicos colapsan bajo ruido de iluminación u oclusión (<span className="font-mono-tech text-[#111827]">F1 &le; 0.104</span>), que <span className="font-mono-tech text-[#111827]">MobileNetV2 INT8</span> alcanza <span className="font-mono-tech text-[#111827]">F1 = 0.715</span> en oclusión y que una cascada adaptativa Edge↔Servidor recorta <span className="font-mono-tech text-[#111827]">97.5%</span> de ancho de banda. <strong>MyLeenTo3</strong> lleva ese mismo principio al espacio 3D métrico para escalar solo las escenas que realmente lo requieren y evitar alucinaciones físicas.
+                </p>
+              </div>
+              <a
+                href="https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#E2E5EA] bg-[#FFFFFF] px-3.5 py-2 text-xs font-medium text-[#1D4ED8] transition-colors hover:border-[#1D4ED8]"
+              >
+                <span>Ver repositorio base C8286</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </a>
+            </div>
           </div>
         </div>
       </section>

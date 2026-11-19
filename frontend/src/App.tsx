@@ -517,6 +517,7 @@ export function App() {
             gtObjects={gtObjects}
             occlusionMatrix={occlusionMatrix}
             metrics={metrics}
+            intrinsicDiagnostics={intrinsicDiagnostics}
             selectedObjectId={selectedObjectId}
             hoveredObjectId={hoveredObjectId}
             highlightedIds={highlightedIds}
@@ -570,7 +571,7 @@ export function App() {
       <footer className="border-t border-[#E2E5EA] bg-[#FFFFFF] py-4">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 px-4 text-[11px] text-[#4B5563] sm:px-6">
           <span>
-            MyLeenTo3 · Laboratorio de Percepción Espacial 3D Monocular (IA-PUCP)
+            MyLeenTo3 · Percepción Espacial 3D Monocular y Compuerta Adaptativa Edge → VLM
           </span>
           <span className="font-mono-tech">
             Gemini Interactions API v1 · Base Quiral det(M) = +1.0 · SEED = 42

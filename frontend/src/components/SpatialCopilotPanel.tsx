@@ -20,6 +20,7 @@ import { sendCopilotMessage } from '../services/api';
 interface SpatialCopilotPanelProps {
   objects: SpatialObject[];
   gtObjects?: SpatialObject[] | null;
+  imageBase64?: string;
   width: number;
   height: number;
   fovHDeg: number;
@@ -30,6 +31,7 @@ interface SpatialCopilotPanelProps {
 
 const QUICK_PROMPTS = [
   'Mide la distancia entre los 2 objetos más cercanos',
+  '¿Conviene escalar el modelo 3D o es confiable esta escena?',
   'Analiza oclusiones y colisiones',
   'Cambia a vista BEV y enfoca el objeto más lejano',
   'Ejecuta barrido de sensibilidad FOV',
@@ -127,6 +129,7 @@ const ToolTraceBlock: React.FC<{ trace: CopilotToolTrace[] }> = ({ trace }) => {
 export const SpatialCopilotPanel: React.FC<SpatialCopilotPanelProps> = ({
   objects,
   gtObjects,
+  imageBase64,
   width,
   height,
   fovHDeg,
@@ -176,6 +179,7 @@ export const SpatialCopilotPanel: React.FC<SpatialCopilotPanelProps> = ({
           message: trimmed,
           objects,
           gt_objects: gtObjects,
+          image_base64: imageBase64,
           width,
           height,
           fov_h_deg: fovHDeg,

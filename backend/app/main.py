@@ -557,6 +557,7 @@ def spatial_copilot(
         message=req.message,
         objects=raw_objects,
         gt_objects=raw_gt,
+        image_base64=req.image_base64,
         width=req.width,
         height=req.height,
         fov_h_deg=req.fov_h_deg,
