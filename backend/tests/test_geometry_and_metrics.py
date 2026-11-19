@@ -691,3 +691,207 @@ def test_real_photo_ransac_boundaries_and_object_metrology() -> None:
     assert obj_met["surface_fit_rmse_m"] < 0.03
     assert obj_met["visible_surface_area_m2"] > 0.01
     assert obj_met["fill_solidity_ratio"] > 0.10
+
+
+def test_clinical_specular_masking_and_modal_foreground_clustering() -> None:
+    from app.core.real_photo_metrics import compute_specular_mask
+    from app.services.local_metric_3d import lift_mask_to_gemini_obb
+
+    h, w = 80, 100
+    xs = np.linspace(-0.22, 0.22, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.18, 0.18, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    pts_cv[..., 2] = 1.85
+
+    mask = np.zeros((h, w), dtype=bool)
+    mask[20:60, 25:75] = True
+    # 65% true foreground mode around 0.55m; inner hollow rings expose 1.85m background; corner has glare spike
+    pts_cv[mask, 2] = 0.55
+    pts_cv[32:48, 38:52] = [0.0, 0.0, 1.85]  # background bleed inside hollow hole (about 10%)
+    pts_cv[20:28, 60:75, 2] = 1.85  # edge bleed
+    pts_cv[22:29, 27:36, 2] = 4.20  # specular spike
+
+    rgb_u8 = np.full((h, w, 3), 90, dtype=np.uint8)
+    rgb_u8[22:29, 27:36] = 250  # bright achromatic specular highlight
+
+    spec_mask, spec_ratio = compute_specular_mask(rgb_u8)
+    assert spec_ratio > 0.005
+    assert bool(np.all(spec_mask[22:29, 27:36]))
+
+    valid = np.ones((h, w), dtype=bool)
+    box = lift_mask_to_gemini_obb(points_cv=pts_cv, binary_mask=mask, valid_mask=valid, rgb_u8=rgb_u8, label="cable")
+    assert box is not None
+    # Modal foreground clustering keeps centroid locked near 0.55 m instead of dragging to 1.0+ m
+    assert 0.48 <= box[1] <= 0.64
+
+
+def test_lshape_bev_orientation_and_amodal_front_anchor() -> None:
+    from app.services.local_metric_3d import _fit_lshape_bev_yaw, lift_mask_to_gemini_obb
+
+    # Asymmetric L-shape point cluster in BEV rotated by +28 degrees
+    rng = np.random.default_rng(42)
+    t_front = np.linspace(-0.28, 0.28, 120)
+    front_pts = np.column_stack([t_front, np.full_like(t_front, -0.10) + rng.normal(0, 0.002, t_front.size)])
+    t_side = np.linspace(-0.10, 0.14, 70)
+    side_pts = np.column_stack([np.full_like(t_side, 0.28) + rng.normal(0, 0.002, t_side.size), t_side])
+    local_l = np.vstack([front_pts, side_pts])
+
+    theta_true = 28.0
+    rad = math.radians(theta_true)
+    c, s = math.cos(rad), math.sin(rad)
+    rot_xy = np.column_stack([local_l[:, 0] * c - local_l[:, 1] * s, local_l[:, 0] * s + local_l[:, 1] * c])
+    yaw_est = _fit_lshape_bev_yaw(rot_xy - np.mean(rot_xy, axis=0))
+    # Box orientation matches modulo 90 degrees orthogonal axes
+    ang_err = min(abs(yaw_est - theta_true), abs(yaw_est + (90.0 - theta_true)))
+    assert ang_err <= 5.0
+
+    # Front-face amodal anchoring for a shallow observed monitor surface at y_front = 1.20m
+    h, w = 80, 100
+    xs = np.linspace(-0.60, 0.60, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.40, 0.40, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    pts_cv[..., 2] = 2.50
+
+    mon_mask = np.zeros((h, w), dtype=bool)
+    mon_mask[18:62, 22:78] = True
+    pts_cv[mon_mask, 2] = 1.20  # pure planar front skin (0 cm observed thickness)
+
+    box = lift_mask_to_gemini_obb(pts_cv, mon_mask, np.ones((h, w), dtype=bool), label="monitor")
+    assert box is not None
+    # Amodal prior enforces minimum depth thickness while anchoring front face near 1.20m
+    assert box[4] >= 0.06
+    assert (box[1] - 0.5 * box[4]) == pytest.approx(1.20, abs=0.03)
+
+
+def test_depth_pro_multiscale_silhouette_recall_and_topographical_volume() -> None:
+    from app.core.real_photo_metrics import (
+        compute_depth_boundary_sharpness,
+        compute_object_point_cloud_metrology,
+        fit_ransac_dominant_plane,
+    )
+
+    h, w = 80, 100
+    xs = np.linspace(-0.4, 0.4, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.3, 0.3, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    pts_cv[..., 2] = 1.50  # vertical flat plane at Y_gem = 1.50 m
+
+    obj_mask = np.zeros((h, w), dtype=bool)
+    obj_mask[24:56, 35:65] = True
+    pts_cv[obj_mask, 2] = 1.12  # 38 cm protruding object (>25% ratio across Depth Pro thresholds)
+
+    valid = np.ones((h, w), dtype=bool)
+    rgb_u8 = np.full((h, w, 3), 180, dtype=np.uint8)
+    rgb_u8[obj_mask] = [40, 70, 160]
+
+    ransac = fit_ransac_dominant_plane(pts_cv, valid, seed=42)
+    assert ransac["detected"] is True
+    assert ransac["plane_orientation"] == "vertical_wall"
+    assert "plane_d_gemini" in ransac
+
+    bnd = compute_depth_boundary_sharpness(pts_cv[..., 2], rgb_u8, valid, instance_masks=[obj_mask])
+    assert bnd["depth_pro_multiscale_f1"] > 0.70
+    assert bnd["silhouette_boundary_recall"] is not None
+    assert bnd["silhouette_boundary_recall"] > 0.85
+
+    obj_met = compute_object_point_cloud_metrology(
+        pts_cv,
+        None,
+        obj_mask,
+        valid,
+        [0.0, 1.12, 0.0, 0.24, 0.04, 0.24, 0.0, 0.0, 0.0],
+        fov_h_deg=60.0,
+        object_id="moge_relief",
+        label="electrical_switch",
+        ransac_plane=ransac,
+    )
+    assert obj_met["max_relief_height_m"] == pytest.approx(0.38, abs=0.03)
+    assert obj_met["mean_relief_height_m"] >= 0.34
+    assert obj_met["integrated_volume_above_plane_m3"] > 0.0
+    assert obj_met["specular_ratio_in_mask"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_ransac_vertical_wall_gfi_and_free_space_consistency() -> None:
+    from app.core.intrinsic_diagnostics import compute_intrinsic_scene_diagnostics
+    from app.core.real_photo_metrics import compute_free_space_consistency, fit_ransac_dominant_plane
+
+    h, w = 64, 80
+    xs = np.linspace(-0.5, 0.5, w, dtype=np.float32)[None, :]
+    ys = np.linspace(-0.4, 0.4, h, dtype=np.float32)[:, None]
+    pts_cv = np.zeros((h, w, 3), dtype=np.float32)
+    pts_cv[..., 0] = np.broadcast_to(xs, (h, w))
+    pts_cv[..., 1] = np.broadcast_to(ys, (h, w))
+    pts_cv[..., 2] = 1.60  # vertical wall at y = 1.60 m
+
+    valid = np.ones((h, w), dtype=bool)
+    ransac = fit_ransac_dominant_plane(pts_cv, valid, seed=42)
+    assert ransac["plane_orientation"] == "vertical_wall"
+
+    # Two boxes mounted on the vertical wall at z = -0.35m and z = +0.35m
+    wall_objects = [
+        {"id": "w1", "label": "outlet_low", "box_3d": [-0.15, 1.56, -0.35, 0.12, 0.08, 0.12, 0.0, 0.0, 0.0]},
+        {"id": "w2", "label": "outlet_high", "box_3d": [0.15, 1.56, 0.35, 0.12, 0.08, 0.12, 0.0, 0.0, 0.0]},
+    ]
+    fs_ok = compute_free_space_consistency(pts_cv[..., 2], valid, wall_objects, fov_h_deg=60.0)
+    assert fs_ok["total_objects"] == 2
+    assert fs_ok["free_space_violation_ratio"] == 0.0
+
+    # Floating outlier placed far ahead at 0.45m when depth rays clearly show 1.60m wall
+    bad_objects = wall_objects + [
+        {"id": "bad_float", "label": "hallucination", "box_3d": [0.0, 0.45, 0.0, 0.25, 0.10, 0.25, 0.0, 0.0, 0.0]},
+    ]
+    fs_bad = compute_free_space_consistency(pts_cv[..., 2], valid, bad_objects, fov_h_deg=60.0)
+    assert fs_bad["free_space_violation_ratio"] > 0.2
+
+    rpm = {
+        "ransac_plane": ransac,
+        "free_space_consistency": fs_ok,
+        "depth_boundaries": {"flying_pixel_ratio": 0.01},
+        "optical_telemetry": {"specular_reflection_ratio": 0.0},
+        "normal_depth_consistency": {"ndc_score_0_100": 90.0},
+    }
+    diag = compute_intrinsic_scene_diagnostics(
+        wall_objects, None, w, h, 60.0, real_photo_metrics=rpm
+    )
+    assert diag["latent_metrics"]["support_plane_mode"] == "vertical_wall"
+    # Vertical wall attachment should have near-zero GFI instead of ~0.70m false floor gap
+    assert diag["latent_metrics"]["gravity_floating_anomaly_m"] < 0.06
+    assert "next_best_view_advice" in diag["cascade_policy"]
+    assert len(diag["scene_graph_3d"]) == 1
+
+
+def test_reproject_canonical_fov_depth_rescaling_and_scene_graph() -> None:
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/reproject",
+        json={
+            "objects": [
+                {"id": "o1", "label": "left_box", "box_3d": [-0.30, 2.00, 0.0, 0.20, 0.20, 0.20, 0.0, 0.0, 0.0]},
+                {"id": "o2", "label": "right_box", "box_3d": [0.40, 2.60, 0.0, 0.25, 0.25, 0.25, 0.0, 0.0, 0.0]},
+            ],
+            "width": 960,
+            "height": 640,
+            "fov_h_deg": 45.0,
+            "reference_fov_h_deg": 60.0,
+            "rescale_depth_with_fov": True,
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    expected_scale = math.tan(math.radians(30.0)) / math.tan(math.radians(22.5))
+    assert payload["objects"][0]["box_3d"][1] == pytest.approx(2.00 * expected_scale, abs=0.01)
+    assert payload["objects"][0]["box_3d"][3] == pytest.approx(0.20 * expected_scale, abs=0.01)
+
+    sg = payload["intrinsic_diagnostics"]["scene_graph_3d"]
+    assert len(sg) == 1
+    assert sg[0]["relation_horizontal"] == "left"
+    assert sg[0]["relation_depth"] == "in_front"

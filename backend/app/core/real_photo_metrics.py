@@ -17,7 +17,37 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image
 
-from .geometry_3d import euler_deg_to_quaternion, quaternion_to_rotation_matrix
+from .geometry_3d import euler_deg_to_quaternion, project_obb_to_2d, quaternion_to_rotation_matrix
+
+
+def compute_specular_mask(rgb_u8: np.ndarray) -> tuple[np.ndarray, float]:
+    """Detect clipped achromatic specular highlights (Harvard clinical endoscopy masking)."""
+    arr = np.asarray(rgb_u8, dtype=np.float32)
+    if arr.size == 0:
+        return np.zeros(arr.shape[:2], dtype=bool), 0.0
+    if float(np.max(arr)) > 1.5:
+        arr = arr / 255.0
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        c_rgb = arr[:, :, :3]
+        luma = 0.2126 * c_rgb[:, :, 0] + 0.7152 * c_rgb[:, :, 1] + 0.0722 * c_rgb[:, :, 2]
+        chroma = np.max(c_rgb, axis=2) - np.min(c_rgb, axis=2)
+    else:
+        luma = arr.astype(np.float32)
+        chroma = np.zeros_like(luma)
+    spec_mask = (luma > 0.90) & (chroma < 0.14)
+    return spec_mask, float(np.mean(spec_mask))
+
+
+def _dilate_binary(mask: np.ndarray, radius: int = 1) -> np.ndarray:
+    """Fast 4-connected morphological binary dilation in pure NumPy."""
+    out = mask.copy()
+    for _ in range(max(1, radius)):
+        cur = out.copy()
+        out[1:, :] |= cur[:-1, :]
+        out[:-1, :] |= cur[1:, :]
+        out[:, 1:] |= cur[:, :-1]
+        out[:, :-1] |= cur[:, 1:]
+    return out
 
 
 def compute_optical_sharpness_and_noise(
@@ -191,10 +221,15 @@ def fit_ransac_dominant_plane(
     seed: int = 42,
     n_iters: int = 120,
     inlier_thresh_m: Optional[float] = None,
+    specular_mask: Optional[np.ndarray] = None,
 ) -> dict[str, Any]:
     """Fit dominant plane via RANSAC + SVD refinement in Gemini coordinates (X-Right, Y-Fwd, Z-Up)."""
     z_cv = points_cv[..., 2]
     keep = valid_mask & np.isfinite(points_cv).all(axis=-1) & (z_cv > 0.04) & (z_cv < 35.0)
+    if specular_mask is not None and specular_mask.shape[:2] == keep.shape[:2]:
+        keep_clean = keep & (~specular_mask)
+        if int(np.sum(keep_clean)) >= 32:
+            keep = keep_clean
     pts_cv = points_cv[keep]
     if pts_cv.shape[0] < 32:
         return {
@@ -203,6 +238,7 @@ def fit_ransac_dominant_plane(
             "rmse_residual_m": 0.0,
             "plane_tilt_deg": 0.0,
             "plane_height_z_m": 0.0,
+            "plane_d_gemini": 0.0,
             "plane_normal_gemini": [0.0, 0.0, 1.0],
             "plane_orientation": "undetermined",
         }
@@ -245,6 +281,7 @@ def fit_ransac_dominant_plane(
             "rmse_residual_m": 0.0,
             "plane_tilt_deg": 0.0,
             "plane_height_z_m": 0.0,
+            "plane_d_gemini": 0.0,
             "plane_normal_gemini": [0.0, 0.0, 1.0],
             "plane_orientation": "undetermined",
         }
@@ -263,6 +300,7 @@ def fit_ransac_dominant_plane(
     tilt_deg = float(math.degrees(math.acos(float(np.clip(abs(normal[2]), 0.0, 1.0)))))
     inlier_ratio = float(best_count) / float(m_pts)
     height_z = float(np.median(inlier_pts[:, 2]))
+    d_plane = float(-np.dot(normal, centroid))
 
     if tilt_deg <= 25.0:
         orientation = "horizontal_support"
@@ -277,6 +315,7 @@ def fit_ransac_dominant_plane(
         "rmse_residual_m": round(rmse, 4),
         "plane_tilt_deg": round(tilt_deg, 2),
         "plane_height_z_m": round(height_z, 3),
+        "plane_d_gemini": round(d_plane, 4),
         "plane_normal_gemini": [round(float(v), 4) for v in normal],
         "plane_orientation": orientation,
     }
@@ -286,12 +325,16 @@ def compute_depth_boundary_sharpness(
     depth_m: np.ndarray,
     rgb_u8: np.ndarray,
     valid_mask: np.ndarray,
+    *,
+    instance_masks: Optional[list[np.ndarray]] = None,
 ) -> dict[str, Any]:
-    """Measure Depth-RGB Boundary F1 alignment and flying-pixel ratio across relative log-depth jumps."""
+    """Measure Depth-RGB Boundary F1, Depth Pro multi-threshold contour sharpness & instance silhouette recall."""
     h, w = depth_m.shape[:2]
     if h < 4 or w < 4:
         return {
             "depth_rgb_boundary_f1": 0.0,
+            "depth_pro_multiscale_f1": 0.0,
+            "silhouette_boundary_recall": None,
             "flying_pixel_ratio": 0.0,
             "depth_smoothness_index": 1.0,
         }
@@ -309,6 +352,8 @@ def compute_depth_boundary_sharpness(
     if valid_jumps.size == 0:
         return {
             "depth_rgb_boundary_f1": 0.0,
+            "depth_pro_multiscale_f1": 0.0,
+            "silhouette_boundary_recall": None,
             "flying_pixel_ratio": 0.0,
             "depth_smoothness_index": 1.0,
         }
@@ -336,18 +381,8 @@ def compute_depth_boundary_sharpness(
     r_thresh = max(0.03, float(np.percentile(r_vals, 82))) if r_vals.size > 0 else 0.05
     rgb_bnd = rgb_edge[:-1, :-1] >= r_thresh
 
-    # 1px dilation in pure NumPy so slight spatial offsets between depth and luminance edges match fairly
-    dil_rgb = rgb_bnd.copy()
-    dil_rgb[1:, :] |= rgb_bnd[:-1, :]
-    dil_rgb[:-1, :] |= rgb_bnd[1:, :]
-    dil_rgb[:, 1:] |= rgb_bnd[:, :-1]
-    dil_rgb[:, :-1] |= rgb_bnd[:, 1:]
-
-    dil_depth = depth_bnd.copy()
-    dil_depth[1:, :] |= depth_bnd[:-1, :]
-    dil_depth[:-1, :] |= depth_bnd[1:, :]
-    dil_depth[:, 1:] |= depth_bnd[:, :-1]
-    dil_depth[:, :-1] |= depth_bnd[:, 1:]
+    dil_rgb = _dilate_binary(rgb_bnd, radius=1)
+    dil_depth = _dilate_binary(depth_bnd, radius=1)
 
     n_d = float(np.sum(depth_bnd))
     n_r = float(np.sum(rgb_bnd))
@@ -358,8 +393,57 @@ def compute_depth_boundary_sharpness(
     else:
         f1 = 0.0
 
+    # Depth Pro (Eq. 3): weighted multi-threshold occluding contours d(j)/d(i) > 1 + t/100, t in [5..25]%
+    d_tl = safe_d[:-1, :-1]
+    d_tr = safe_d[:-1, 1:]
+    d_bl = safe_d[1:, :-1]
+    rx = np.maximum(d_tr / np.maximum(d_tl, 1e-4), d_tl / np.maximum(d_tr, 1e-4))
+    ry = np.maximum(d_bl / np.maximum(d_tl, 1e-4), d_tl / np.maximum(d_bl, 1e-4))
+    r_max = np.maximum(rx, ry)
+
+    thresholds_pct = (5.0, 10.0, 15.0, 20.0, 25.0)
+    w_sum = sum(thresholds_pct)
+    ms_f1 = 0.0
+    if n_r > 0.0:
+        for t_pct in thresholds_pct:
+            w_t = t_pct / w_sum
+            occ_t = (r_max > (1.0 + t_pct / 100.0)) & v_int
+            nd_t = float(np.sum(occ_t))
+            if nd_t > 0.0:
+                dil_occ = _dilate_binary(occ_t, radius=1)
+                p_t = float(np.sum(occ_t & dil_rgb)) / nd_t
+                r_t = float(np.sum(rgb_bnd & dil_occ)) / n_r
+                ms_f1 += w_t * ((2.0 * p_t * r_t) / max(p_t + r_t, 1e-6))
+
+    sil_recall: Optional[float] = None
+    if instance_masks:
+        sil_bnd = np.zeros((h - 1, w - 1), dtype=bool)
+        for raw_m in instance_masks:
+            if raw_m.shape[:2] != (h, w):
+                pil_m = Image.fromarray((raw_m > 0).astype(np.uint8) * 255, mode="L").resize(
+                    (w, h), Image.Resampling.NEAREST
+                )
+                b = np.asarray(pil_m) > 127
+            else:
+                b = raw_m > 0
+            sil_bnd |= (b[:-1, :-1] != b[:-1, 1:]) | (b[:-1, :-1] != b[1:, :-1])
+        sil_bnd &= v_int
+        n_sil = float(np.sum(sil_bnd))
+        if n_sil > 0.0:
+            rec_acc = 0.0
+            for t_pct in thresholds_pct:
+                w_t = t_pct / w_sum
+                occ_t = (r_max > (1.0 + t_pct / 100.0)) & v_int
+                dil2_occ = _dilate_binary(occ_t, radius=2)
+                rec_acc += w_t * (float(np.sum(sil_bnd & dil2_occ)) / n_sil)
+            sil_recall = round(rec_acc, 4)
+        else:
+            sil_recall = 0.0
+
     return {
         "depth_rgb_boundary_f1": round(f1, 4),
+        "depth_pro_multiscale_f1": round(ms_f1, 4),
+        "silhouette_boundary_recall": sil_recall,
         "flying_pixel_ratio": round(flying_ratio, 4),
         "depth_smoothness_index": round(smoothness, 4),
     }
@@ -375,8 +459,10 @@ def compute_object_point_cloud_metrology(
     *,
     object_id: str = "obj_1",
     label: str = "object",
+    ransac_plane: Optional[dict[str, Any]] = None,
+    specular_mask: Optional[np.ndarray] = None,
 ) -> dict[str, Any]:
-    """Compute per-object OBB point-cloud SDF RMSE, visible surface area (m^2), solidity & angular span."""
+    """Compute per-object OBB point-cloud SDF RMSE, visible surface area (m^2), relief/volume over RANSAC plane & glare ratio."""
     h, w = points_cv.shape[:2]
     if binary_mask.shape != (h, w):
         pil_m = Image.fromarray((binary_mask > 0).astype(np.uint8) * 255, mode="L").resize(
@@ -400,6 +486,11 @@ def compute_object_point_cloud_metrology(
             "depth_iqr_m": 0.0,
             "angular_span_deg": [0.0, 0.0],
             "normal_consistency_deg": 0.0,
+            "mean_relief_height_m": 0.0,
+            "max_relief_height_m": 0.0,
+            "plane_contact_gap_m": 0.0,
+            "integrated_volume_above_plane_m3": 0.0,
+            "specular_ratio_in_mask": 0.0,
         }
 
     pts_cv = points_cv[mask]
@@ -450,6 +541,34 @@ def compute_object_point_cloud_metrology(
     else:
         vis_area_m2 = float(np.sum(pixel_area_m2))
 
+    # Topographical relief & volume over dominant RANSAC plane (Harvard 1710.11216 & Odense NCT02423850)
+    mean_relief_m = 0.0
+    max_relief_m = 0.0
+    contact_gap_m = 0.0
+    vol_above_m3 = 0.0
+    if ransac_plane is not None and ransac_plane.get("detected"):
+        n_pl = np.array(ransac_plane["plane_normal_gemini"], dtype=np.float64)
+        n_norm = float(np.linalg.norm(n_pl))
+        if n_norm > 1e-7:
+            n_pl = n_pl / n_norm
+            d_pl = float(
+                ransac_plane.get(
+                    "plane_d_gemini",
+                    -float(n_pl[2]) * float(ransac_plane.get("plane_height_z_m", 0.0)),
+                )
+            )
+            cam_sign = 1.0 if d_pl >= 0.0 else -1.0
+            h_signed = cam_sign * (pts_gem @ n_pl + d_pl)
+            h_pos = np.maximum(h_signed, 0.0)
+            mean_relief_m = float(np.mean(h_pos))
+            max_relief_m = float(np.percentile(h_pos, 95))
+            contact_gap_m = float(np.percentile(np.abs(h_signed), 5))
+            vol_above_m3 = max(0.0, float(np.sum(h_pos * pixel_area_m2)))
+
+    spec_in_mask = 0.0
+    if specular_mask is not None and specular_mask.shape[:2] == (h, w):
+        spec_in_mask = float(np.mean(specular_mask[mask]))
+
     # Depth thickness IQR (p75 - p25)
     q25, q75 = np.percentile(z_m, [25, 75])
     depth_iqr = float(q75 - q25)
@@ -492,6 +611,89 @@ def compute_object_point_cloud_metrology(
         "depth_iqr_m": round(depth_iqr, 4),
         "angular_span_deg": [round(ang_h, 2), round(ang_v, 2)],
         "normal_consistency_deg": round(obj_ndc_deg, 2),
+        "mean_relief_height_m": round(mean_relief_m, 4),
+        "max_relief_height_m": round(max_relief_m, 4),
+        "plane_contact_gap_m": round(contact_gap_m, 4),
+        "integrated_volume_above_plane_m3": round(vol_above_m3, 6),
+        "specular_ratio_in_mask": round(spec_in_mask, 4),
+    }
+
+
+def compute_free_space_consistency(
+    depth_m: np.ndarray,
+    valid_mask: np.ndarray,
+    objects: list[dict[str, Any]],
+    fov_h_deg: float,
+) -> dict[str, Any]:
+    """Check whether projected 3D boxes respect observed metric free-space depth rays (PhySIC 2510.11649)."""
+    h, w = depth_m.shape[:2]
+    if h < 4 or w < 4 or not objects:
+        return {
+            "free_space_violation_ratio": 0.0,
+            "mean_depth_residual_m": 0.0,
+            "consistent_objects": 0,
+            "total_objects": 0,
+        }
+
+    evaluated = 0
+    violations = 0
+    residuals: list[float] = []
+
+    for obj in objects:
+        box = obj.get("box_3d")
+        if not isinstance(box, (list, tuple)) or len(box) < 6:
+            continue
+        proj = project_obb_to_2d(box, w, h, float(fov_h_deg))
+        if proj.get("behind_camera"):
+            continue
+        verts = proj.get("vertices_2d") or []
+        if not verts:
+            continue
+        us = [float(p[0]) for p in verts]
+        vs = [float(p[1]) for p in verts]
+        u0 = max(0.0, min(us))
+        u1 = min(float(w - 1), max(us))
+        v0 = max(0.0, min(vs))
+        v1 = min(float(h - 1), max(vs))
+        du = u1 - u0
+        dv = v1 - v0
+        if du < 4.0 or dv < 4.0:
+            continue
+
+        x0 = max(0, min(w - 1, int(round(u0 + 0.25 * du))))
+        x1 = max(x0 + 1, min(w, int(round(u1 - 0.25 * du))))
+        y0 = max(0, min(h - 1, int(round(v0 + 0.25 * dv))))
+        y1 = max(y0 + 1, min(h, int(round(v1 - 0.25 * dv))))
+
+        win_d = depth_m[y0:y1, x0:x1]
+        win_v = valid_mask[y0:y1, x0:x1] & np.isfinite(win_d) & (win_d > 0.02)
+        if int(np.sum(win_v)) < 4:
+            continue
+
+        d_obs = float(np.median(win_d[win_v]))
+        y_c = max(0.05, float(box[1]))
+        dy = abs(float(box[4]))
+        y_front = y_c - 0.5 * dy
+        y_back = y_c + 0.5 * dy
+
+        evaluated += 1
+        residuals.append(abs(d_obs - y_c))
+        if (d_obs > y_back + max(0.08, 0.14 * y_c)) or (y_front > d_obs + max(0.12, 0.18 * d_obs)):
+            violations += 1
+
+    if evaluated == 0:
+        return {
+            "free_space_violation_ratio": 0.0,
+            "mean_depth_residual_m": 0.0,
+            "consistent_objects": 0,
+            "total_objects": 0,
+        }
+
+    return {
+        "free_space_violation_ratio": round(float(violations) / float(evaluated), 4),
+        "mean_depth_residual_m": round(float(np.mean(residuals)), 4),
+        "consistent_objects": int(evaluated - violations),
+        "total_objects": int(evaluated),
     }
 
 
@@ -508,20 +710,46 @@ def compute_real_photo_3d_metrics(
     width: Optional[int] = None,
     height: Optional[int] = None,
     per_object_metrology: Optional[list[dict[str, Any]]] = None,
+    instance_masks: Optional[list[np.ndarray]] = None,
+    objects: Optional[list[dict[str, Any]]] = None,
+    ransac_plane: Optional[dict[str, Any]] = None,
+    specular_mask: Optional[np.ndarray] = None,
 ) -> dict[str, Any]:
     """Compute unified SOTA monocular 3D real-photo metrology payload."""
     h_img, w_img = depth_m.shape[:2]
     full_w = int(width or w_img)
     full_h = int(height or h_img)
 
+    if specular_mask is None:
+        spec_mask, spec_ratio = compute_specular_mask(rgb_u8)
+    else:
+        spec_mask = specular_mask
+        spec_ratio = float(np.mean(specular_mask)) if specular_mask.size > 0 else 0.0
+
     ndc = compute_normal_depth_consistency(points_cv, normals_cv, valid_mask)
-    ransac = fit_ransac_dominant_plane(points_cv, valid_mask, seed=42)
-    boundaries = compute_depth_boundary_sharpness(depth_m, rgb_u8, valid_mask)
+    ransac = (
+        ransac_plane
+        if ransac_plane is not None
+        else fit_ransac_dominant_plane(points_cv, valid_mask, seed=42, specular_mask=spec_mask)
+    )
+    boundaries = compute_depth_boundary_sharpness(
+        depth_m,
+        rgb_u8,
+        valid_mask,
+        instance_masks=instance_masks,
+    )
     optical = compute_optical_sharpness_and_noise(
         rgb_u8.astype(np.float32) / 255.0,
         effective_fov_h_deg,
         full_w,
         full_h,
+    )
+    optical["specular_reflection_ratio"] = round(spec_ratio, 4)
+    free_space = compute_free_space_consistency(
+        depth_m,
+        valid_mask,
+        objects or [],
+        effective_fov_h_deg,
     )
 
     keep = valid_mask & np.isfinite(points_cv).all(axis=-1) & np.isfinite(depth_m) & (depth_m > 0.02)
@@ -585,6 +813,7 @@ def compute_real_photo_3d_metrics(
             "scene_span_xyz_m": span_xyz,
         },
         "optical_telemetry": optical,
+        "free_space_consistency": free_space,
         "fov_exif_vs_moge_diff_deg": fov_diff,
         "per_object_metrology": per_object_metrology or [],
         "overall_3d_geometry_score_0_100": overall_score,

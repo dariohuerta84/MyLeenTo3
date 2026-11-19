@@ -137,6 +137,7 @@ export interface LatentIntrinsicMetrics {
   volume_interpenetration_index: number;
   gravity_floating_anomaly_m: number;
   support_plane_z_m: number;
+  support_plane_mode?: string;
   scale_depth_ambiguity_score: number;
   frustum_truncation_ratio: number;
   mean_depth_uncertainty_m: number;
@@ -164,6 +165,19 @@ export interface ExploitedWeaknessEntry {
   explanation: string;
 }
 
+export interface SceneGraphRelation {
+  from_id: string;
+  from_label: string;
+  to_id: string;
+  to_label: string;
+  relation_horizontal: string;
+  relation_depth: string;
+  center_distance_m: number;
+  surface_clearance_m: number;
+  is_colliding: boolean;
+  occlusion_ratio: number;
+}
+
 export interface CascadePolicy {
   operational_verdict: 'APROBADO' | 'ESCALAR_MODELO' | 'RECHAZADO_FISICA' | string;
   recommended_tier: string;
@@ -173,6 +187,8 @@ export interface CascadePolicy {
   min_surface_clearance_m: number | null;
   occlusion_pairs_count: number;
   colliding_pairs_count: number;
+  viewpoint_ambiguity_score?: number;
+  next_best_view_advice?: string;
   trigger_reasons: string[];
   summary: string;
 }
@@ -185,6 +201,7 @@ export interface IntrinsicDiagnostics {
   reference_free_fov_sweep: FovSweepPoint[];
   estimated_optimal_fov_h_deg: number;
   cascade_policy?: CascadePolicy;
+  scene_graph_3d?: SceneGraphRelation[];
 }
 
 export interface BenchmarkScene {
@@ -228,6 +245,11 @@ export interface PerObjectPointCloudMetrology {
   depth_iqr_m: number;
   angular_span_deg: [number, number];
   normal_consistency_deg: number;
+  mean_relief_height_m?: number;
+  max_relief_height_m?: number;
+  plane_contact_gap_m?: number;
+  integrated_volume_above_plane_m3?: number;
+  specular_ratio_in_mask?: number;
 }
 
 export interface RealPhotoMetrics {
@@ -246,11 +268,14 @@ export interface RealPhotoMetrics {
     rmse_residual_m: number;
     plane_tilt_deg: number;
     plane_height_z_m: number;
+    plane_d_gemini?: number;
     plane_normal_gemini: [number, number, number];
     plane_orientation: string;
   };
   depth_boundaries: {
     depth_rgb_boundary_f1: number;
+    depth_pro_multiscale_f1?: number;
+    silhouette_boundary_recall?: number | null;
     flying_pixel_ratio: number;
     depth_smoothness_index: number;
   };
@@ -266,6 +291,13 @@ export interface RealPhotoMetrics {
     noise_sigma_est: number;
     dynamic_contrast_ratio: number;
     equivalent_focal_35mm_mm: number;
+    specular_reflection_ratio?: number;
+  };
+  free_space_consistency?: {
+    free_space_violation_ratio: number;
+    mean_depth_residual_m: number;
+    consistent_objects: number;
+    total_objects: number;
   };
   fov_exif_vs_moge_diff_deg?: number | null;
   per_object_metrology: PerObjectPointCloudMetrology[];

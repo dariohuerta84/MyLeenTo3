@@ -280,6 +280,73 @@ def _weakness_label_for_object(
     return "Estable"
 
 
+def _build_scene_graph_3d(
+    objects: list[dict[str, Any]],
+    occlusion_matrix: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build metric 3D Scene Graph edges (SpatialRGPT / Thinking in Space) for up to 8 key pairs."""
+    n = len(objects)
+    if n < 2:
+        return []
+
+    occ_lookup: dict[tuple[str, str], float] = {}
+    for entry in occlusion_matrix:
+        a = str(entry.get("occluder_id", ""))
+        b = str(entry.get("occluded_id", ""))
+        ratio = float(entry.get("occlusion_ratio", 0.0))
+        if a and b:
+            occ_lookup[(a, b)] = max(occ_lookup.get((a, b), 0.0), ratio)
+
+    edges: list[dict[str, Any]] = []
+    for i in range(n):
+        oi = objects[i]
+        idi = str(oi.get("id", f"obj_{i + 1}"))
+        lbli = str(oi.get("label", idi))
+        bi = oi["box_3d"]
+        for j in range(i + 1, n):
+            oj = objects[j]
+            idj = str(oj.get("id", f"obj_{j + 1}"))
+            lblj = str(oj.get("label", idj))
+            bj = oj["box_3d"]
+
+            pair = compute_pairwise_geometry(bi, bj)
+            dx = float(bj[0]) - float(bi[0])
+            dy = float(bj[1]) - float(bi[1])
+
+            if abs(dx) <= 0.08:
+                rel_h = "aligned"
+            elif dx > 0.0:
+                rel_h = "left"
+            else:
+                rel_h = "right"
+
+            if abs(dy) <= 0.08:
+                rel_d = "same_depth"
+            elif dy > 0.0:
+                rel_d = "in_front"
+            else:
+                rel_d = "behind"
+
+            occ_ij = max(occ_lookup.get((idi, idj), 0.0), occ_lookup.get((idj, idi), 0.0))
+            edges.append(
+                {
+                    "from_id": idi,
+                    "from_label": lbli,
+                    "to_id": idj,
+                    "to_label": lblj,
+                    "relation_horizontal": rel_h,
+                    "relation_depth": rel_d,
+                    "center_distance_m": round(float(pair["center_distance_m"]), 3),
+                    "surface_clearance_m": round(float(pair["surface_clearance_m"]), 3),
+                    "is_colliding": bool(pair["is_colliding"]),
+                    "occlusion_ratio": round(occ_ij, 3),
+                }
+            )
+
+    edges.sort(key=lambda e: (-e["occlusion_ratio"], e["surface_clearance_m"], e["center_distance_m"]))
+    return edges[:8]
+
+
 def _compute_cascade_policy(
     *,
     objects: list[dict[str, Any]],
@@ -292,6 +359,7 @@ def _compute_cascade_policy(
     sdas: float,
     fbr: float,
     ofi: float,
+    real_photo_metrics: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Classify scene stress in C8286 regimes and emit deterministic Edge -> 3D escalation gate."""
     n = len(objects)
@@ -312,6 +380,33 @@ def _compute_cascade_policy(
     dark_ratio = float(image_profile.get("dark_shadow_ratio", 0.0))
     bloom_ratio = float(image_profile.get("bloom_saturation_ratio", 0.0))
     lum_mean = float(image_profile.get("luminance_mean", 0.5))
+
+    free_space_viol = 0.0
+    total_fs = 0
+    fly_ratio = 0.0
+    spec_ratio = 0.0
+    ndc_score = 100.0
+    if real_photo_metrics is not None:
+        fs = real_photo_metrics.get("free_space_consistency") or {}
+        free_space_viol = float(fs.get("free_space_violation_ratio", 0.0))
+        total_fs = int(fs.get("total_objects", 0))
+        bnd = real_photo_metrics.get("depth_boundaries") or {}
+        fly_ratio = float(bnd.get("flying_pixel_ratio", 0.0))
+        opt = real_photo_metrics.get("optical_telemetry") or {}
+        spec_ratio = float(opt.get("specular_reflection_ratio", 0.0))
+        ndc = real_photo_metrics.get("normal_depth_consistency") or {}
+        ndc_score = float(ndc.get("ndc_score_0_100", 100.0))
+
+    ndc_term = (1.0 - ndc_score / 100.0) if real_photo_metrics is not None else 0.0
+    viewpoint_ambiguity = float(
+        min(
+            1.0,
+            0.45 * max_occ
+            + 0.25 * fbr
+            + 0.15 * min(1.0, spec_ratio / 0.15)
+            + 0.15 * max(0.0, ndc_term),
+        )
+    )
 
     # Separate real underexposure/localized glare from uniform bright studio backdrops
     is_illum_stress = (
@@ -346,6 +441,10 @@ def _compute_cascade_policy(
             "min_surface_clearance_m": None,
             "occlusion_pairs_count": 0,
             "colliding_pairs_count": 0,
+            "viewpoint_ambiguity_score": round(viewpoint_ambiguity, 3),
+            "next_best_view_advice": (
+                "Cambiar encuadre hacia una vista más centrada e iluminada para capturar la silueta completa antes de inferir profundidad."
+            ),
             "trigger_reasons": reasons,
             "summary": "Compuerta RECHAZADA: 0 objetos 3D detectados; requiere re-captura o verificación manual.",
         }
@@ -377,6 +476,10 @@ def _compute_cascade_policy(
             "min_surface_clearance_m": min_clearance,
             "occlusion_pairs_count": occ_count,
             "colliding_pairs_count": colliding_pairs,
+            "viewpoint_ambiguity_score": round(viewpoint_ambiguity, 3),
+            "next_best_view_advice": (
+                "Recapturar desde ángulo oblicuo (25°–40°) evitando reflejos especulares directos o colisiones aparentes para desambiguar el volumen 3D."
+            ),
             "trigger_reasons": reasons,
             "summary": (
                 f"Compuerta RECHAZADA por inconsistencia física severa ({reasons[0]}). "
@@ -394,6 +497,8 @@ def _compute_cascade_policy(
         or sdas >= 0.62
         or plausibility < 68.0
         or max_abs_yaw_deg >= 45.0
+        or (total_fs > 0 and free_space_viol >= 0.45)
+        or (real_photo_metrics is not None and fly_ratio >= 0.18)
     ):
         if is_occ_stress:
             reasons.append(
@@ -421,6 +526,28 @@ def _compute_cascade_policy(
             reasons.append(
                 f"Ambigüedad escala–profundidad (SDAS {sdas:.2f}) o plausibilidad intermedia ({plausibility:.1f}/100)."
             )
+        if total_fs > 0 and free_space_viol >= 0.45:
+            reasons.append(
+                f"Inconsistencia de espacio libre PhySIC ({free_space_viol * 100:.0f}% de cuboides invaden rayos libres o superficie observada por MoGe-2)."
+            )
+        if real_photo_metrics is not None and fly_ratio >= 0.18:
+            reasons.append(
+                f"Alta tasa de píxeles volantes Depth Pro ({fly_ratio * 100:.1f}% >= 18.0%) en bordes oclusivos."
+            )
+        if spec_ratio >= 0.12:
+            reasons.append(
+                f"Saturación especular clínica/industrial elevada ({spec_ratio * 100:.1f}% >= 12.0%, máscara Harvard aplicada)."
+            )
+
+        if is_occ_stress or fbr >= 0.25 or viewpoint_ambiguity >= 0.35:
+            nbv_advice = (
+                "Capturar una vista complementaria con desplazamiento lateral de 15°–30° para reducir la auto-oclusión o el truncamiento en borde de cámara."
+            )
+        else:
+            nbv_advice = (
+                "Encuadre aceptable; para reducir reflejos especulares o ruido residual usar iluminación difusa y validar con modelo profundo."
+            )
+
         return {
             "operational_verdict": "ESCALAR_MODELO",
             "recommended_tier": "VLM_3D_DEEP_REASONING",
@@ -430,6 +557,8 @@ def _compute_cascade_policy(
             "min_surface_clearance_m": min_clearance,
             "occlusion_pairs_count": occ_count,
             "colliding_pairs_count": colliding_pairs,
+            "viewpoint_ambiguity_score": round(viewpoint_ambiguity, 3),
+            "next_best_view_advice": nbv_advice,
             "trigger_reasons": reasons,
             "summary": (
                 f"Escalar a gemini-4-hydrogen (régimen C8286 '{regime}'): {reasons[0]}"
@@ -451,6 +580,12 @@ def _compute_cascade_policy(
             "con orientación u oclusión leve: el nivel intermedio preserva precisión reduciendo latencia."
         )
 
+    nbv_clean = (
+        "Vista geométricamente bien condicionada; no requiere recaptura ni cambio de ángulo."
+        if viewpoint_ambiguity < 0.35
+        else "Oclusión leve detectada; un desplazamiento ligero mejora el margen en caras posteriores."
+    )
+
     return {
         "operational_verdict": "APROBADO",
         "recommended_tier": "VLM_3D_FAST_TIER",
@@ -460,6 +595,8 @@ def _compute_cascade_policy(
         "min_surface_clearance_m": min_clearance,
         "occlusion_pairs_count": occ_count,
         "colliding_pairs_count": colliding_pairs,
+        "viewpoint_ambiguity_score": round(viewpoint_ambiguity, 3),
+        "next_best_view_advice": nbv_clean,
         "trigger_reasons": reasons,
         "summary": (
             f"Compuerta APROBADA en tier rápido ({rec_model}, -{savings:.0f}% latencia estimada vs. modelo profundo): "
@@ -475,6 +612,7 @@ def compute_intrinsic_scene_diagnostics(
     height: int,
     fov_h_deg: float,
     occlusion_matrix: Optional[list[dict[str, Any]]] = None,
+    real_photo_metrics: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Compute reference-free latent 3D metrics, photometric stress, and FOV sweep."""
     rgb = _decode_rgb_array(image_base64, max_width=320)
@@ -516,6 +654,7 @@ def compute_intrinsic_scene_diagnostics(
             sdas=0.0,
             fbr=0.0,
             ofi=0.0,
+            real_photo_metrics=real_photo_metrics,
         )
         return {
             "image_profile": image_profile,
@@ -525,6 +664,7 @@ def compute_intrinsic_scene_diagnostics(
                 "volume_interpenetration_index": 0.0,
                 "gravity_floating_anomaly_m": 0.0,
                 "support_plane_z_m": 0.0,
+                "support_plane_mode": "latent_horizontal_quantile",
                 "scale_depth_ambiguity_score": 0.0,
                 "frustum_truncation_ratio": 0.0,
                 "mean_depth_uncertainty_m": 0.0,
@@ -542,9 +682,11 @@ def compute_intrinsic_scene_diagnostics(
             "reference_free_fov_sweep": empty_sweep,
             "estimated_optimal_fov_h_deg": int(round(fov_h_deg)),
             "cascade_policy": empty_policy,
+            "scene_graph_3d": [],
         }
 
-    # Precompute bottom faces for latent support plane
+    # Precompute bottom faces & corners for latent or RANSAC support plane
+    all_corners: list[np.ndarray] = []
     z_bots: list[float] = []
     volumes: list[float] = []
     depths: list[float] = []
@@ -553,6 +695,7 @@ def compute_intrinsic_scene_diagnostics(
     for obj in objects:
         box = obj["box_3d"]
         corners = obb_corners_gemini(box)
+        all_corners.append(corners)
         z_bots.append(float(np.min(corners[:, 2])))
         dx, dy, dz = abs(float(box[3])), abs(float(box[4])), abs(float(box[5]))
         volumes.append(max(dx * dy * dz, 1e-6))
@@ -560,6 +703,18 @@ def compute_intrinsic_scene_diagnostics(
         anisotropies.append(1.0 - min(dx, dy, dz) / max(dx, dy, dz, 1e-6))
 
     support_plane_z = float(np.percentile(z_bots, 25))
+    support_plane_mode = "latent_horizontal_quantile"
+    n_ransac: Optional[np.ndarray] = None
+    d_ransac: float = 0.0
+    rp = (real_photo_metrics or {}).get("ransac_plane") if real_photo_metrics else None
+    if isinstance(rp, dict) and rp.get("detected") and rp.get("plane_normal_gemini"):
+        n_cand = np.array(rp["plane_normal_gemini"], dtype=float)
+        norm_c = float(np.linalg.norm(n_cand))
+        if norm_c > 1e-7:
+            n_ransac = n_cand / norm_c
+            support_plane_mode = str(rp.get("plane_orientation", "ransac_plane"))
+            support_plane_z = float(rp.get("plane_height_z_m", support_plane_z))
+            d_ransac = float(rp.get("plane_d_gemini", -float(n_ransac[2]) * support_plane_z))
 
     # Pairwise 3D volume interpenetration (PVI)
     total_vol = float(sum(volumes))
@@ -614,8 +769,16 @@ def compute_intrinsic_scene_diagnostics(
         box = obj["box_3d"]
         y_depth = depths[idx]
         roll, pitch = float(box[6]), float(box[7])
-        tilt_penalty = 0.004 * (abs(roll) + abs(pitch))
-        float_gap = abs(z_bots[idx] - support_plane_z) + tilt_penalty
+        if n_ransac is not None:
+            tilt_penalty = (
+                0.004 * (abs(roll) + abs(pitch))
+                if support_plane_mode == "horizontal_support"
+                else 0.0
+            )
+            float_gap = float(np.min(np.abs(all_corners[idx] @ n_ransac + d_ransac))) + tilt_penalty
+        else:
+            tilt_penalty = 0.004 * (abs(roll) + abs(pitch))
+            float_gap = abs(z_bots[idx] - support_plane_z) + tilt_penalty
 
         proj = project_obb_to_2d(box, width, height, fov_h_deg)
         out_count = 0
@@ -702,6 +865,7 @@ def compute_intrinsic_scene_diagnostics(
         "volume_interpenetration_index": round(pvi, 4),
         "gravity_floating_anomaly_m": round(gfi, 3),
         "support_plane_z_m": round(support_plane_z, 3),
+        "support_plane_mode": support_plane_mode,
         "scale_depth_ambiguity_score": round(sdas, 4),
         "frustum_truncation_ratio": round(fbr, 4),
         "mean_depth_uncertainty_m": round(ofi, 3),
@@ -838,6 +1002,7 @@ def compute_intrinsic_scene_diagnostics(
         sdas=sdas,
         fbr=fbr,
         ofi=ofi,
+        real_photo_metrics=real_photo_metrics,
     )
 
     return {
@@ -848,6 +1013,7 @@ def compute_intrinsic_scene_diagnostics(
         "reference_free_fov_sweep": ref_sweep,
         "estimated_optimal_fov_h_deg": int(best_fov_pt["fov_h_deg"]),
         "cascade_policy": cascade_policy,
+        "scene_graph_3d": _build_scene_graph_3d(objects, occlusion_matrix),
     }
 
 

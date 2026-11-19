@@ -408,6 +408,15 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
 
           <div className="rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] p-3 text-xs">
             <div className="font-semibold text-[#111827]">{cascadePolicy.summary}</div>
+            {cascadePolicy.next_best_view_advice && (
+              <div className="font-mono-tech mt-2 border-l-2 border-[#1D4ED8] pl-2.5 text-[11px] text-[#111827]">
+                Next-Best-View (ActivePose
+                {typeof cascadePolicy.viewpoint_ambiguity_score === 'number'
+                  ? ` · ambigüedad ${(cascadePolicy.viewpoint_ambiguity_score * 100).toFixed(0)}%`
+                  : ''}
+                ): {cascadePolicy.next_best_view_advice}
+              </div>
+            )}
             {cascadePolicy.trigger_reasons.length > 0 && (
               <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] text-[#4B5563]">
                 {cascadePolicy.trigger_reasons.map((reason, i) => (
@@ -934,26 +943,36 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
             </div>
 
             <div className="border-l-2 border-[#B45309] pl-3">
-              <div className="text-[11px] font-medium text-[#4B5563]">Bordes Profundidad-RGB (DBE)</div>
+              <div className="text-[11px] font-medium text-[#4B5563]">Bordes Profundidad-RGB (DBE) &amp; Espacio Libre</div>
               <div className="font-mono-tech mt-1 text-base font-semibold text-[#111827]">
-                F1 {(realPhotoMetrics.depth_boundaries.depth_rgb_boundary_f1 * 100).toFixed(1)}% · Fly{' '}
-                {(realPhotoMetrics.depth_boundaries.flying_pixel_ratio * 100).toFixed(2)}%
+                F1 {(realPhotoMetrics.depth_boundaries.depth_rgb_boundary_f1 * 100).toFixed(1)}%
+                {typeof realPhotoMetrics.depth_boundaries.silhouette_boundary_recall === 'number'
+                  ? ` · Silueta ${(realPhotoMetrics.depth_boundaries.silhouette_boundary_recall * 100).toFixed(1)}%`
+                  : ''}{' '}
+                · Fly {(realPhotoMetrics.depth_boundaries.flying_pixel_ratio * 100).toFixed(2)}%
               </div>
               <div className="font-mono-tech mt-0.5 text-[10px] text-[#4B5563]">
-                Envergadura {realPhotoMetrics.depth_profile.scene_span_xyz_m.map((v) => `${v.toFixed(2)}m`).join(' × ')} ·{' '}
-                {realPhotoMetrics.depth_profile.metric_scale_regime}
+                Envergadura {realPhotoMetrics.depth_profile.scene_span_xyz_m.map((v) => `${v.toFixed(2)}m`).join(' × ')}
+                {realPhotoMetrics.free_space_consistency && realPhotoMetrics.free_space_consistency.total_objects > 0
+                  ? ` · Free-Space ${realPhotoMetrics.free_space_consistency.consistent_objects}/${realPhotoMetrics.free_space_consistency.total_objects}`
+                  : ''}
+                {typeof realPhotoMetrics.optical_telemetry.specular_reflection_ratio === 'number'
+                  ? ` · Especular ${(realPhotoMetrics.optical_telemetry.specular_reflection_ratio * 100).toFixed(1)}%`
+                  : ''}
               </div>
             </div>
           </div>
 
           {realPhotoMetrics.per_object_metrology.length > 0 && (
             <div className="scroll-affordance-x rounded-lg border border-[#E2E5EA]">
-              <table className="font-mono-tech w-full min-w-[760px] text-left text-[11px]">
+              <table className="font-mono-tech w-full min-w-[900px] text-left text-[11px]">
                 <thead className="border-b border-[#E2E5EA] bg-[#F7F7F5] text-[#4B5563]">
                   <tr>
                     <th className="px-3 py-2 font-sans font-medium">Objeto</th>
                     <th className="px-3 py-2 font-sans font-medium">Puntos 3D</th>
                     <th className="px-3 py-2 font-sans font-medium">Área Visible (m²)</th>
+                    <th className="px-3 py-2 font-sans font-medium">Relieve RANSAC (cm)</th>
+                    <th className="px-3 py-2 font-sans font-medium">Vol. s/Plano (cm³)</th>
                     <th className="px-3 py-2 font-sans font-medium">Ajuste Caja RMSE (cm)</th>
                     <th className="px-3 py-2 font-sans font-medium">Solidez</th>
                     <th className="px-3 py-2 font-sans font-medium">Espesor IQR (cm)</th>
@@ -968,6 +987,16 @@ export const MetricsBenchmarkPanel: React.FC<MetricsBenchmarkPanelProps> = ({
                       </td>
                       <td className="px-3 py-2">{m.point_count.toLocaleString()}</td>
                       <td className="px-3 py-2 text-[#1D4ED8]">{m.visible_surface_area_m2.toFixed(4)}</td>
+                      <td className="px-3 py-2 text-[#0F766E]">
+                        {typeof m.max_relief_height_m === 'number'
+                          ? `${(m.max_relief_height_m * 100).toFixed(1)} cm`
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {typeof m.integrated_volume_above_plane_m3 === 'number'
+                          ? (m.integrated_volume_above_plane_m3 * 1e6).toFixed(0)
+                          : '—'}
+                      </td>
                       <td className="px-3 py-2">{(m.surface_fit_rmse_m * 100).toFixed(2)} cm</td>
                       <td className="px-3 py-2">{(m.fill_solidity_ratio * 100).toFixed(1)}%</td>
                       <td className="px-3 py-2">{(m.depth_iqr_m * 100).toFixed(2)} cm</td>

@@ -29,6 +29,8 @@ from PIL import Image, ImageOps
 from ..core.real_photo_metrics import (
     compute_object_point_cloud_metrology,
     compute_real_photo_3d_metrics,
+    compute_specular_mask,
+    fit_ransac_dominant_plane,
 )
 
 try:
@@ -366,10 +368,115 @@ def pack_point_cloud_threejs(
     }
 
 
+_AMODAL_THICKNESS_RATIO: dict[str, float] = {
+    "cardboard_box": 0.65,
+    "storage_crate": 0.65,
+    "cup": 0.85,
+    "mug": 0.85,
+    "bottle": 0.85,
+    "oscilloscope": 0.55,
+    "monitor": 0.18,
+    "laptop": 0.60,
+    "book": 0.25,
+    "electronic_device": 0.30,
+    "electrical_switch": 0.25,
+    "wall_outlet": 0.22,
+    "power_outlet": 0.22,
+    "socket": 0.22,
+    "chair": 0.75,
+    "desk": 0.55,
+    "table": 0.60,
+    "person": 0.45,
+    "hand": 0.30,
+    "bag": 0.50,
+    "backpack": 0.55,
+    "tool": 0.30,
+    "phone": 0.15,
+    "keyboard": 0.35,
+    "computer_mouse": 0.65,
+}
+
+
+def _filter_foreground_depth_mode(pts_cv: np.ndarray) -> np.ndarray:
+    """Isolate dominant foreground depth cluster to prevent background bleed in hollow/edge masks."""
+    if pts_cv.shape[0] < 24:
+        return pts_cv
+    z = pts_cv[:, 2]
+    if float(np.ptp(z)) < 0.03:
+        return pts_cv
+
+    z02, z98 = float(np.percentile(z, 2)), float(np.percentile(z, 98))
+    if z98 - z02 < 0.03:
+        return pts_cv
+
+    counts, edges = np.histogram(z, bins=24, range=(z02, z98))
+    max_cnt = int(counts.max())
+    min_sig = max(8, int(round(0.28 * max_cnt)), int(round(0.14 * len(z))))
+    sig_bins = np.where(counts >= min_sig)[0]
+    idx_mode = int(sig_bins[0]) if sig_bins.size > 0 else int(np.argmax(counts))
+    z_mode = 0.5 * float(edges[idx_mode] + edges[idx_mode + 1])
+
+    nb_win = max(0.10, 0.25 * z_mode)
+    local_z = z[np.abs(z - z_mode) <= nb_win]
+    mad = float(np.median(np.abs(local_z - np.median(local_z)))) if local_z.size >= 6 else 0.0
+    tol = max(0.06, 0.12 * z_mode, min(0.35 * z_mode, 2.6 * mad))
+
+    core = pts_cv[np.abs(z - z_mode) <= tol]
+    if core.shape[0] >= 12:
+        return core
+
+    z_lo, z_hi = np.percentile(z, [10, 85])
+    fallback = pts_cv[(z >= z_lo) & (z <= z_hi)]
+    return fallback if fallback.shape[0] >= 12 else pts_cv
+
+
+def _fit_lshape_bev_yaw(xy_centered: np.ndarray) -> float:
+    """Estimate BEV yaw via vectorized Minimum-Area + L-Shape boundary alignment (eliminating PCA diagonal bias)."""
+    if xy_centered.shape[0] < 20:
+        return 0.0
+    if float(np.ptp(xy_centered[:, 0])) < 0.015 or float(np.ptp(xy_centered[:, 1])) < 0.015:
+        return 0.0
+
+    pts = (
+        xy_centered[np.linspace(0, xy_centered.shape[0] - 1, 600, dtype=np.int64)]
+        if xy_centered.shape[0] > 600
+        else xy_centered
+    )
+    px = pts[:, 0][None, :]
+    py = pts[:, 1][None, :]
+
+    def _best_for_grid(thetas_deg: np.ndarray) -> float:
+        rads = np.radians(thetas_deg)
+        c = np.cos(rads)[:, None]
+        s = np.sin(rads)[:, None]
+        u = px * c + py * s
+        v = -px * s + py * c
+
+        u0 = np.percentile(u, 3, axis=1)
+        u1 = np.percentile(u, 97, axis=1)
+        v0 = np.percentile(v, 3, axis=1)
+        v1 = np.percentile(v, 97, axis=1)
+        su = np.maximum(u1 - u0, 1e-3)
+        sv = np.maximum(v1 - v0, 1e-3)
+
+        du = np.minimum(np.abs(u - u0[:, None]), np.abs(u1[:, None] - u)) / su[:, None]
+        dv = np.minimum(np.abs(v - v0[:, None]), np.abs(v1[:, None] - v)) / sv[:, None]
+        edge_resid = np.mean(np.minimum(du, dv), axis=1)
+        losses = (su * sv) * (0.65 + 0.35 * (edge_resid / 0.25)) + 1e-6 * np.abs(thetas_deg)
+        return float(thetas_deg[int(np.argmin(losses))])
+
+    coarse_best = _best_for_grid(np.linspace(-84.0, 84.0, 43))
+    fine_best = _best_for_grid(np.linspace(coarse_best - 4.0, coarse_best + 4.0, 9))
+    return float(np.clip(fine_best, -85.0, 85.0))
+
+
 def lift_mask_to_gemini_obb(
     points_cv: np.ndarray,
     binary_mask: np.ndarray,
     valid_mask: np.ndarray,
+    *,
+    rgb_u8: Optional[np.ndarray] = None,
+    label: Optional[str] = None,
 ) -> Optional[list[float]]:
     """Lift a 2D binary instance mask over metric 3D points into a robust 9-DOF Gemini OBB."""
     h, w = points_cv.shape[:2]
@@ -382,8 +489,17 @@ def lift_mask_to_gemini_obb(
         mask = binary_mask > 0
 
     mask = mask & valid_mask & np.isfinite(points_cv).all(axis=-1)
-    if int(np.sum(mask)) < 16:
+    total_valid = int(np.sum(mask))
+    if total_valid < 16:
         return None
+
+    # Clinical specular glare suppression (Harvard Mahmood Lab): strip clipped highlights unless >70% white object
+    if rgb_u8 is not None and rgb_u8.shape[:2] == (h, w):
+        spec_mask, _ = compute_specular_mask(rgb_u8)
+        clean_mask = mask & (~spec_mask)
+        n_clean = int(np.sum(clean_mask))
+        if n_clean >= 24 and n_clean >= int(0.30 * total_valid):
+            mask = clean_mask
 
     # Erode boundary slightly to reduce background depth bleed on edges
     if cv2 is not None and int(np.sum(mask)) >= 140:
@@ -398,11 +514,8 @@ def lift_mask_to_gemini_obb(
     if pts_cv.shape[0] < 16:
         return None
 
-    # Core depth filtering [p12, p88] rejects foreground fingers/noise and background leak
-    z_lo, z_hi = np.percentile(pts_cv[:, 2], [12, 88])
-    core = pts_cv[(pts_cv[:, 2] >= z_lo) & (pts_cv[:, 2] <= z_hi)]
-    if core.shape[0] < 12:
-        core = pts_cv
+    # Modal foreground clustering avoids bimodal background averaging inside open masks
+    core = _filter_foreground_depth_mode(pts_cv)
 
     # Trim lateral extreme 3% tails
     x_lo, x_hi = np.percentile(core[:, 0], [3, 97])
@@ -421,23 +534,8 @@ def lift_mask_to_gemini_obb(
     xy_mean = np.mean(xy, axis=0)
     xy_centered = xy - xy_mean
 
-    # Dominant horizontal yaw via 2D PCA when object shows clear elongation
-    yaw_deg = 0.0
-    if xy_centered.shape[0] >= 20:
-        cov = np.cov(xy_centered.T)
-        if np.all(np.isfinite(cov)):
-            eigvals, eigvecs = np.linalg.eigh(cov)
-            l_min = max(float(eigvals[0]), 1e-8)
-            l_max = max(float(eigvals[1]), 1e-8)
-            if l_max / l_min >= 1.8:
-                major = eigvecs[:, 1]
-                ang = math.degrees(math.atan2(float(major[1]), float(major[0])))
-                # Wrap cleanly into [-85, 85] degrees so local axes stay consistent
-                while ang > 90.0:
-                    ang -= 180.0
-                while ang < -90.0:
-                    ang += 180.0
-                yaw_deg = float(np.clip(ang, -85.0, 85.0))
+    # Vectorized BEV L-Shape / Minimum-Area yaw (avoids PCA hypotenuse bias)
+    yaw_deg = _fit_lshape_bev_yaw(xy_centered)
 
     rad = math.radians(yaw_deg)
     c_y, s_y = math.cos(rad), math.sin(rad)
@@ -451,12 +549,25 @@ def lift_mask_to_gemini_obb(
     gz_min, gz_max = float(np.percentile(z_gem, 2)), float(np.percentile(z_gem, 98))
 
     dx = max(0.03, lx_max - lx_min)
-    dy = max(0.03, ly_max - ly_min)
+    dy_obs = max(0.03, ly_max - ly_min)
     dz = max(0.03, gz_max - gz_min)
 
-    # Single-view camera only observes the visible front shell, so add a mild minimum thickness when flat
+    # Single-view camera only observes the visible front shell: anchor front face when amodal prior applies
+    norm_lbl = str(label or "").strip().lower().replace(" ", "_")
+    amodal_ratio = _AMODAL_THICKNESS_RATIO.get(norm_lbl)
+    if amodal_ratio is not None:
+        amodal_min = min(0.65, amodal_ratio * min(dx, dz))
+        if dy_obs < amodal_min:
+            dy = max(0.03, amodal_min)
+            cy_local = ly_min + 0.5 * dy
+        else:
+            dy = dy_obs
+            cy_local = 0.5 * (ly_min + ly_max)
+    else:
+        dy = dy_obs
+        cy_local = 0.5 * (ly_min + ly_max)
+
     cx_local = 0.5 * (lx_min + lx_max)
-    cy_local = 0.5 * (ly_min + ly_max)
     cz_world = 0.5 * (gz_min + gz_max)
 
     cx_world = float(xy_mean[0] + cx_local * c_y - cy_local * s_y)
@@ -770,21 +881,24 @@ def run_local_metric_3d(
                 if is_dup:
                     continue
 
-                box_3d = lift_mask_to_gemini_obb(
-                    moge_out["points_cv"],
-                    bin_mask,
-                    moge_out["valid_mask"],
-                )
-                if box_3d is None:
-                    continue
-
-                kept_masks_proc.append(bin_mask)
                 raw_name = (
                     names.get(int(cls_ids[i]), f"object_{int(cls_ids[i])}")
                     if isinstance(names, dict)
                     else f"object_{int(cls_ids[i])}"
                 )
                 clean_label = str(raw_name).strip().replace(" ", "_") or f"obj_{idx_num + 1}"
+
+                box_3d = lift_mask_to_gemini_obb(
+                    moge_out["points_cv"],
+                    bin_mask,
+                    moge_out["valid_mask"],
+                    rgb_u8=rgb_u8,
+                    label=clean_label,
+                )
+                if box_3d is None:
+                    continue
+
+                kept_masks_proc.append(bin_mask)
                 lifted_objects.append(
                     {
                         "id": f"moge_{len(lifted_objects) + 1}",
@@ -802,6 +916,14 @@ def run_local_metric_3d(
             max_objects=min(max_objects, 4),
         )
 
+    spec_mask, _ = compute_specular_mask(rgb_u8)
+    ransac_plane = fit_ransac_dominant_plane(
+        moge_out["points_cv"],
+        moge_out["valid_mask"],
+        seed=42,
+        specular_mask=spec_mask,
+    )
+
     per_object_metrology: list[dict[str, Any]] = []
     for idx_m, obj_item in enumerate(lifted_objects):
         mask_m = kept_masks_proc[idx_m] if idx_m < len(kept_masks_proc) else None
@@ -816,6 +938,8 @@ def run_local_metric_3d(
                     effective_fov,
                     object_id=obj_item["id"],
                     label=obj_item["label"],
+                    ransac_plane=ransac_plane,
+                    specular_mask=spec_mask,
                 )
             )
 
@@ -835,6 +959,10 @@ def run_local_metric_3d(
         width=w,
         height=h,
         per_object_metrology=per_object_metrology,
+        instance_masks=kept_masks_proc,
+        objects=lifted_objects,
+        ransac_plane=ransac_plane,
+        specular_mask=spec_mask,
     )
     latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 

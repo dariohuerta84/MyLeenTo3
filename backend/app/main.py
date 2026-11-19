@@ -415,6 +415,7 @@ def analyze_scene(
         height,
         effective_fov_h_deg,
         occlusion_matrix=occlusion_matrix,
+        real_photo_metrics=real_photo_metrics,
     )
 
     metrics = None
@@ -458,6 +459,16 @@ def analyze_scene(
 def reproject_scene(req: ReprojectRequest) -> ReprojectResponse:
     t0 = time.perf_counter()
     raw_objects = [obj.model_dump(exclude_none=True) for obj in req.objects]
+    if req.rescale_depth_with_fov and req.reference_fov_h_deg is not None:
+        ref_tan = math.tan(math.radians(float(req.reference_fov_h_deg)) * 0.5)
+        cur_tan = max(math.tan(math.radians(float(req.fov_h_deg)) * 0.5), 1e-4)
+        depth_scale = ref_tan / cur_tan
+        for obj in raw_objects:
+            box = list(obj.get("box_3d", []))
+            if len(box) >= 6:
+                for k in range(6):
+                    box[k] = round(float(box[k]) * depth_scale, 4)
+                obj["box_3d"] = box
     raw_gt = [obj.model_dump(exclude_none=True) for obj in req.gt_objects] if req.gt_objects is not None else None
 
     fov_v_deg = round(compute_fov_v_deg(req.fov_h_deg, req.width, req.height), 4)

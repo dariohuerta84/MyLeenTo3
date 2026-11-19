@@ -8,7 +8,7 @@
 ![React 19 + Three.js](https://img.shields.io/badge/Frontend-React_19_+_Three.js-1D4ED8?style=for-the-badge&logo=threedotjs&logoColor=white)
 ![Google AI Studio v1](https://img.shields.io/badge/Gemini-Interactions_API_v1-0F766E?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![MoGe-2 + YOLOE GPU](https://img.shields.io/badge/3D_Local-MoGe--2_%2B_YOLOE_GPU-1D4ED8?style=for-the-badge)
-![Pytest 46/46](https://img.shields.io/badge/Pytest-46%2F46_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
+![Pytest 51/51](https://img.shields.io/badge/Pytest-51%2F51_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
 ![SEED 42](https://img.shields.io/badge/Reproducibility-SEED_%3D_42-B45309?style=for-the-badge)
 [![Predecesor 2D](https://img.shields.io/badge/Evolución_de-C8286_Visión_2D-4B5563?style=for-the-badge&logo=github)](https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN)
 
@@ -154,7 +154,7 @@ flowchart LR
 3. **Proyección Pinhole y Campo Vertical:** $f = W / (2\tan(\text{FOV}_h/2))$, $\text{FOV}_v = 2\arctan(\tan(\text{FOV}_h/2)\cdot H/W)$.
 4. **Métricas Exactas, NDS y Omni3D:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$), matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera, puntaje estático **`nds_static`** (*nuScenes*) y desglose **Omni3D** por rangos de profundidad (`near_0_2m`, `mid_2_3.5m`, `far_3.5m_plus`).
 5. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
-6. **Metrología 3D de Foto Real (`real_photo_metrics.py`):** evalúa sobre fotografías reales sin Ground Truth la consistencia normal–profundidad `NDC` (normals de MoGe-2 vs. producto cruzado parcial $\partial\mathbf{P}/\partial v \times \partial\mathbf{P}/\partial u$), alineación ortogonal *Manhattan* (`manhattan_alignment_score`), plano dominante vía `RANSAC` (`RMSE`, pendiente en grados e *inliers*), nitidez de bordes profundidad–RGB tipo *Depth Pro* (`DBE` F1 y ratio de *flying pixels*), perfil óptico (varianza Laplaciana, ruido $\sigma$ y focal equivalente 35 mm), además de área superficial 3D visible ($\text{m}^2$) y ajuste SDF a OBB por cada instancia detectada.
+6. **Metrología de Foto Real y Estándar Clínico/Industrial (`real_photo_metrics.py`, `local_metric_3d.py` & `NDS`):** integra supresión de reflejos especulares (*Harvard Medical School / BWH*), filtrado modal frontal contra sangrado de fondo (*OVMono3D / MoGe-2*), ajuste ortogonal en **L** en BEV + anclaje de cara frontal (*NVIDIA FoundationPose / Geo6DPose*), contorno oclusivo multi-umbral $t \in [5, 25]\%$ con *Silhouette Recall* (*Apple Depth Pro*), consistencia de espacio libre (*PhySIC*), relieve topográfico y volumen sobre el plano **RANSAC** (*Odense NCT02423850*), `GFI` acoplado al plano real (`vertical_wall` / `horizontal_support`), escalado canónico por $\text{FOV}_h$ (*Metric3D v2*), grafo espacial **3D Scene Graph** (*SpatialRGPT / Thinking in Space*) y guía **Next-Best-View** (*CAI4CAI / ActivePose*).
 
 </details>
 
@@ -192,7 +192,7 @@ Levanta automáticamente FastAPI en **`http://127.0.0.1:8085`** y React/Vite en 
 # 1. Opcional: dependencias PyTorch CUDA + MoGe-2 + YOLOE para reconstrucción métrica local GPU
 uv pip install --python backend/.venv/bin/python -r backend/requirements-local-3d.txt
 
-# 2. Suite completa de 46 pruebas deterministas offline (geometría, metrología 3D real, API y compuerta)
+# 2. Suite completa de 51 pruebas deterministas offline (geometría, metrología 3D clínica/industrial, API y compuerta)
 MYLEENTO3_LOCAL_3D_ENGINE=0 backend/.venv/bin/pytest -v
 
 # 2. Pruebas en vivo HTTP de los 3 modelos + 3 fotos diversas (requiere servidor en :8085)

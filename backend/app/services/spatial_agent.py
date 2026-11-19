@@ -430,6 +430,7 @@ class SpatialToolbox:
         )
         policy = dict(diag.get("cascade_policy") or {})
         latent = dict(diag.get("latent_metrics") or {})
+        scene_graph = list(diag.get("scene_graph_3d") or [])
         if policy.get("occlusion_pairs_count", 0) > 0:
             self.scene_actions.append({"type": "toggle_occlusion_rays", "enabled": True})
         return {
@@ -438,6 +439,8 @@ class SpatialToolbox:
             "volume_interpenetration_index": latent.get("volume_interpenetration_index", 0.0),
             "gravity_floating_anomaly_m": latent.get("gravity_floating_anomaly_m", 0.0),
             "mean_depth_uncertainty_m": latent.get("mean_depth_uncertainty_m", 0.0),
+            "support_plane_mode": latent.get("support_plane_mode", "latent_horizontal_quantile"),
+            "scene_graph_3d": scene_graph[:5],
         }
 
 

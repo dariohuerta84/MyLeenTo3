@@ -171,6 +171,8 @@ class ReprojectRequest(BaseModel):
     width: int = Field(..., gt=0)
     height: int = Field(..., gt=0)
     fov_h_deg: float = Field(..., ge=20.0, le=140.0)
+    reference_fov_h_deg: Optional[float] = Field(default=None, ge=20.0, le=140.0)
+    rescale_depth_with_fov: bool = False
 
 
 class ReprojectResponse(BaseModel):
