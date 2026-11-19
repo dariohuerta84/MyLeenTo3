@@ -24,12 +24,21 @@ from app.core.multiframe_audit import (
     audit_multiframe_consistency,
     get_demo_multiframe_sequence,
 )
+from app.core.scale_calibration import (
+    clamp_scale_factor,
+    compute_scale_factor_from_reference,
+    rescale_box_3d,
+    rescale_depth_stats,
+    rescale_real_photo_metrics,
+)
 from app.core.synthetic_benchmark import get_benchmark, list_benchmarks
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     BenchmarksResponse,
     BenchmarkSummary,
+    CalibrateScaleRequest,
+    CalibrateScaleResponse,
     CompareModelsRequest,
     CompareModelsResponse,
     CopilotRequest,
@@ -225,6 +234,8 @@ def analyze_scene(
     point_cloud: Optional[dict[str, Any]] = None
     real_photo_metrics: Optional[dict[str, Any]] = None
     discovery_meta: Optional[dict[str, Any]] = None
+    active_moge_backbone: Optional[str] = None
+    aruco_anchor: Optional[dict[str, Any]] = None
 
     use_local_depth = req.engine != "salience_fallback" and is_local_3d_available()
 
@@ -232,7 +243,7 @@ def analyze_scene(
         nonlocal image_b64, mime_type, width, height, effective_fov_h_deg, fov_source
         nonlocal exif_fov_h_deg, estimated_moge_fov_h_deg, raw_objects, scene_summary
         nonlocal depth_map_base64, depth_stats, point_cloud, real_photo_metrics
-        nonlocal latency_ms, mode, discovery_meta
+        nonlocal latency_ms, mode, discovery_meta, active_moge_backbone, aruco_anchor
 
         image_b64 = local_res["image_base64"]
         mime_type = local_res["mime_type"]
@@ -249,6 +260,8 @@ def analyze_scene(
         point_cloud = local_res["point_cloud"]
         real_photo_metrics = local_res.get("real_photo_metrics")
         discovery_meta = local_res.get("discovery_meta")
+        active_moge_backbone = local_res.get("moge_backbone")
+        aruco_anchor = local_res.get("aruco_anchor")
         latency_ms = local_res["latency_ms"]
         mode = local_res["mode"]
 
@@ -336,6 +349,8 @@ def analyze_scene(
                 max_objects=req.max_objects,
                 custom_prompt=req.custom_prompt,
                 vlm_discovery=vlm_discovery,
+                moge_backbone=req.moge_backbone,
+                aruco_marker_size_cm=req.aruco_marker_size_cm,
             )
             _apply_local_result(local_res)
             d_min = float((depth_stats or {}).get("min_m", 0.0))
@@ -367,6 +382,8 @@ def analyze_scene(
                     image_b64,
                     fov_override_deg=effective_fov_h_deg,
                     auto_fov=req.auto_fov,
+                    moge_backbone=req.moge_backbone,
+                    aruco_marker_size_cm=req.aruco_marker_size_cm,
                 )
                 effective_fov_h_deg = float(depth_ctx["effective_fov_h_deg"])
                 fov_source = str(depth_ctx["fov_source"])
@@ -376,6 +393,8 @@ def analyze_scene(
                 depth_stats = depth_ctx["depth_stats"]
                 point_cloud = depth_ctx["point_cloud"]
                 real_photo_metrics = depth_ctx.get("real_photo_metrics")
+                active_moge_backbone = depth_ctx.get("moge_backbone")
+                aruco_anchor = depth_ctx.get("aruco_anchor")
             except Exception:
                 pass
         try:
@@ -404,6 +423,8 @@ def analyze_scene(
                         auto_fov=req.auto_fov,
                         max_objects=req.max_objects,
                         custom_prompt=req.custom_prompt,
+                        moge_backbone=req.moge_backbone,
+                        aruco_marker_size_cm=req.aruco_marker_size_cm,
                     )
                     _apply_local_result(local_res)
                     notice = (
@@ -427,6 +448,8 @@ def analyze_scene(
                 auto_fov=req.auto_fov,
                 max_objects=req.max_objects,
                 custom_prompt=req.custom_prompt,
+                moge_backbone=req.moge_backbone,
+                aruco_marker_size_cm=req.aruco_marker_size_cm,
             )
             _apply_local_result(local_res)
             d_min = float((depth_stats or {}).get("min_m", 0.0))
@@ -509,6 +532,9 @@ def analyze_scene(
         fov_source=fov_source,
         exif_fov_h_deg=exif_fov_h_deg,
         estimated_moge_fov_h_deg=estimated_moge_fov_h_deg,
+        moge_backbone=active_moge_backbone,
+        scale_factor=1.0,
+        aruco_anchor=aruco_anchor,
         image_base64=image_b64,
         mime_type=mime_type,
         scene_summary=scene_summary,
@@ -583,6 +609,108 @@ def reproject_scene(req: ReprojectRequest) -> ReprojectResponse:
         metrics=metrics,
         fov_sweep=fov_sweep,
         intrinsic_diagnostics=intrinsic_diagnostics,
+        latency_ms=latency_ms,
+    )
+
+
+@app.post("/api/calibrate-scale", response_model=CalibrateScaleResponse)
+def calibrate_scene_scale(req: CalibrateScaleRequest) -> CalibrateScaleResponse:
+    t0 = time.perf_counter()
+    if req.scale_factor is not None:
+        factor = round(clamp_scale_factor(req.scale_factor), 5)
+    elif req.measured_distance_m is not None and req.reference_distance_m is not None:
+        try:
+            factor = compute_scale_factor_from_reference(
+                req.measured_distance_m, req.reference_distance_m
+            )["scale_factor"]
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'scale_factor' or both 'measured_distance_m' and 'reference_distance_m'.",
+        )
+
+    raw_objects = []
+    for obj in req.objects:
+        d = obj.model_dump(exclude_none=True)
+        d["box_3d"] = rescale_box_3d(d["box_3d"], factor)
+        raw_objects.append(d)
+
+    raw_gt = (
+        [obj.model_dump(exclude_none=True) for obj in req.gt_objects]
+        if req.gt_objects is not None
+        else None
+    )
+
+    scaled_depth_stats = rescale_depth_stats(req.depth_stats, factor)
+    scaled_real_metrics = rescale_real_photo_metrics(req.real_photo_metrics, factor)
+
+    fov_v_deg = round(compute_fov_v_deg(req.fov_h_deg, req.width, req.height), 4)
+    enriched_objects = [_enrich_object(obj, req.width, req.height, req.fov_h_deg) for obj in raw_objects]
+    enriched_gt = (
+        [_enrich_object(obj, req.width, req.height, req.fov_h_deg) for obj in raw_gt]
+        if raw_gt is not None
+        else None
+    )
+    occlusion_matrix = compute_occlusion_matrix(raw_objects)
+    intrinsic_diagnostics = compute_intrinsic_scene_diagnostics(
+        raw_objects,
+        req.image_base64,
+        req.width,
+        req.height,
+        req.fov_h_deg,
+        occlusion_matrix=occlusion_matrix,
+        real_photo_metrics=scaled_real_metrics,
+    )
+    metrics = (
+        evaluate_scene_predictions(raw_objects, raw_gt, req.width, req.height, req.fov_h_deg)
+        if raw_gt is not None
+        else None
+    )
+
+    discovery_hint: Optional[dict[str, Any]] = None
+    if req.scene_intelligence and isinstance(req.scene_intelligence, dict):
+        si = req.scene_intelligence
+        discovery_hint = {
+            "discovery_mode": si.get("discovery_mode", "local_yoloe_pf_adaptive"),
+            "domain": si.get("domain", "general_physical"),
+            "domain_label_es": si.get("domain_label_es", "Inspección Física General"),
+            "scene_context_es": si.get("scene_context_es", ""),
+            "detected_classes": list(si.get("active_vocabulary") or []),
+            "active_vocabulary": list(si.get("active_vocabulary") or []),
+            "prompt_free_discoveries": list(si.get("prompt_free_discoveries") or []),
+            "vlm_guided_count": int(si.get("vlm_guided_count", 0) or 0),
+            "detection_sources": list(si.get("detection_sources") or []),
+            "inspection_focus_es": list(si.get("inspection_focus_es") or []),
+        }
+
+    scene_intelligence, _ = build_scene_intelligence_payload(
+        discovery=discovery_hint,
+        objects=raw_objects,
+        occlusion_matrix=occlusion_matrix,
+        intrinsic_diagnostics=intrinsic_diagnostics,
+        real_photo_metrics=scaled_real_metrics,
+        depth_stats=scaled_depth_stats,
+        allow_live_vlm=False,
+    )
+    latency_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+
+    return CalibrateScaleResponse(
+        scale_factor=factor,
+        reference_label=req.reference_label,
+        width=req.width,
+        height=req.height,
+        fov_h_deg=req.fov_h_deg,
+        fov_v_deg=fov_v_deg,
+        objects=enriched_objects,
+        gt_objects=enriched_gt,
+        occlusion_matrix=occlusion_matrix,
+        metrics=metrics,
+        intrinsic_diagnostics=intrinsic_diagnostics,
+        depth_stats=scaled_depth_stats,
+        real_photo_metrics=scaled_real_metrics,
+        scene_intelligence=scene_intelligence,
         latency_ms=latency_ms,
     )
 

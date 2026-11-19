@@ -8,7 +8,7 @@
 ![React 19 + Three.js](https://img.shields.io/badge/Frontend-React_19_+_Three.js-1D4ED8?style=for-the-badge&logo=threedotjs&logoColor=white)
 ![Google AI Studio v1](https://img.shields.io/badge/Gemini-Interactions_API_v1-0F766E?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![MoGe-2 + YOLOE GPU](https://img.shields.io/badge/3D_Local-MoGe--2_%2B_YOLOE_GPU-1D4ED8?style=for-the-badge)
-![Pytest 60/60](https://img.shields.io/badge/Pytest-60%2F60_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
+![Pytest 66/66](https://img.shields.io/badge/Pytest-66%2F66_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
 ![SEED 42](https://img.shields.io/badge/Reproducibility-SEED_%3D_42-B45309?style=for-the-badge)
 [![Predecesor 2D](https://img.shields.io/badge/Evolución_de-C8286_Visión_2D-4B5563?style=for-the-badge&logo=github)](https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN)
 
@@ -113,17 +113,18 @@ flowchart LR
     subgraph Client["Frontend Web (React 19 + Vite + Three.js R3F)"]
         UI["Landing Scroll IZQ↔DER + Toolbar + Compuerta C8286"]
         V2D["PinholeOverlay2D (2D + Shift-Click)"]
-        V3D["Scene3DViewport (WebGL métrico 1u = 1m)"]
+        V3D["Scene3DViewport (Surfels 2DGS + Calibrador 3D + Ancla Escala)"]
         COP["SpatialCopilotPanel (8 Funciones + Scene Actions)"]
     end
 
     subgraph Backend["Backend FastAPI (Python 3.12)"]
-        API["REST API (/api/* · 9 Endpoints)"]
+        API["REST API (/api/* · 10 Endpoints)"]
         GEO["core/geometry_3d.py (ZYX, Rx(-90°), Pinhole K, SAT, Kay-Kajiya)"]
+        CAL["core/scale_calibration.py (Ancla Física + ArUco + Calibrador 3D)"]
         MTR["core/metrics.py (NDS, Omni3D Depth Bins, mIoU, AP, ATE/AOE)"]
         DIA["core/intrinsic_diagnostics.py (PECS, PVI, GFI, SDAS, Optica)"]
         RPM["core/real_photo_metrics.py (NDC, Manhattan, RANSAC, DBE, Area)"]
-        L3D["services/local_metric_3d.py (EXIF 35mm + MoGe-2 + YOLOE-PF/OV)"]
+        L3D["services/local_metric_3d.py (EXIF + MoGe-2 ViT-S/B/L + YOLOE-PF/OV)"]
         SINT["services/scene_intelligence.py (VLM / PF Discovery + Diagnóstico 3D)"]
         SVC["services/gemini_vision.py & spatial_agent.py"]
     end
@@ -136,6 +137,7 @@ flowchart LR
     V2D <-->|Sincronización 2D-3D + Depth Map| V3D
     COP <-->|scene_actions| V3D
     API --> GEO
+    API --> CAL
     API --> MTR
     API --> DIA
     API --> RPM
@@ -158,6 +160,7 @@ flowchart LR
 5. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
 6. **Metrología de Foto Real y Estándar Clínico/Industrial (`real_photo_metrics.py`, `local_metric_3d.py` & `NDS`):** integra supresión de reflejos especulares (*Harvard Medical School / BWH*), filtrado modal frontal contra sangrado de fondo (*OVMono3D / MoGe-2*), ajuste ortogonal en **L** en BEV + anclaje de cara frontal (*NVIDIA FoundationPose / Geo6DPose*), contorno oclusivo multi-umbral $t \in [5, 25]\%$ con *Silhouette Recall* (*Apple Depth Pro*), consistencia de espacio libre (*PhySIC*), relieve topográfico y volumen sobre el plano **RANSAC** (*Odense NCT02423850*), `GFI` acoplado al plano real (`vertical_wall` / `horizontal_support`), escalado canónico por $\text{FOV}_h$ (*Metric3D v2*), grafo espacial **3D Scene Graph** (*SpatialRGPT / Thinking in Space*) y guía **Next-Best-View** (*CAI4CAI / ActivePose*).
 7. **Inteligencia de Escena Híbrida y Diagnóstico 3D Adaptativo (`scene_intelligence.py`):** conecta comprensión semántica por imagen (`Gemini VLM` o descubrimiento autónomo local con `YOLOE-pf 4,585 cl.`) con detección abierta `YOLOE-OV` (`get_text_pe`) + elevación modal frontal `MoGe-2`, auditoría contra *priors* físicos de tamaño real y un **Diagnóstico LLM/Determinista fundado en telemetría 3D** con 8 herramientas del Copiloto Espacial.
+8. **Metrología Exacta Fase 2 (`scale_calibration.py`, `/api/calibrate-scale` y `Calibrador 3D`):** medición directa punto-a-punto sobre surfels 2DGS o malla 2.5D con perfil topográfico en `mm`, **ancla de escala global** por referencia conocida (tarjeta `8.56 cm`, moneda `2.5 cm`, hoja A4 `29.7 cm` o medida libre) o detección automática **ArUco** (`DICT_4X4_50`/`5X5_100`/`6X6_250`) y selector de precisión **`MoGe-2 ViT-S` / `ViT-B` / `ViT-L`** con liberación segura de VRAM.
 
 </details>
 
@@ -168,7 +171,8 @@ flowchart LR
 | :--- | :--- | :--- |
 | `GET` | `/api/health` | Estado del servicio, modelos soportados y versión de `google-genai`. |
 | `GET` | `/api/benchmarks` | Catálogo de las 3 escenas calibradas (`SEED=42`) con *Ground Truth*. |
-| `POST` | `/api/analyze` | Percepción 3D híbrida (`Híbrido VLM → YOLOE-OV → MoGe-2` o local `YOLOE-PF 4585 → YOLOE-OV → MoGe-2`), surfels 2DGS, `cascade_policy` y diagnóstico `scene_intelligence`. |
+| `POST` | `/api/analyze` | Percepción 3D híbrida (`Híbrido VLM → YOLOE-OV → MoGe-2` o local `YOLOE-PF 4585 → YOLOE-OV → MoGe-2 ViT-S/B/L`), detección ArUco, surfels 2DGS y diagnóstico `scene_intelligence`. |
+| `POST` | `/api/calibrate-scale` | Recalibración métrica radial uniforme ($\alpha \in [0.1, 10.0]$) por objeto de referencia o ArUco actualizando envolventes, `depth_stats`, áreas ($\times \alpha^2$), volúmenes ($\times \alpha^3$) y *priors* de escala. |
 | `POST` | `/api/reproject` | Recálculo instantáneo ($< 10\text{ ms}$) al variar $\text{FOV}_h$ sin gastar tokens. |
 | `POST` | `/api/measure` | Distancia euclidiana, holgura mínima superficie-a-superficie, colisión SAT e IoU entre 2 objetos. |
 | `POST` | `/api/compare-models` | Comparativa reproducible entre `gemini-4-hydrogen`, `gemini-4-argon` y `gemini-3.5-flash-lite`. |
@@ -195,7 +199,7 @@ Levanta automáticamente FastAPI en **`http://127.0.0.1:8085`** y React/Vite en 
 # 1. Opcional: dependencias PyTorch CUDA + MoGe-2 + YOLOE para reconstrucción métrica local GPU
 uv pip install --python backend/.venv/bin/python -r backend/requirements-local-3d.txt
 
-# 2. Suite completa de 60 pruebas deterministas offline (descubrimiento híbrido, metrología 3D, surfels 2DGS, API y compuerta)
+# 2. Suite completa de 66 pruebas deterministas offline (descubrimiento híbrido, calibración física/ArUco, metrología 3D, surfels 2DGS y API)
 MYLEENTO3_LOCAL_3D_ENGINE=0 backend/.venv/bin/pytest -v
 
 # 2. Pruebas en vivo HTTP de los 3 modelos + 3 fotos diversas (requiere servidor en :8085)

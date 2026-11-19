@@ -1,20 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Edges, Line, OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
   Box,
   Camera,
   Compass,
+  Crosshair,
   Download,
   Eye,
   Focus,
   Grid,
   Layers,
+  RotateCcw,
+  Scale,
   Scissors,
+  X,
 } from 'lucide-react';
 import type {
+  ArucoAnchor,
   CameraViewMode,
   DepthStats,
   MeasurementState,
@@ -40,6 +45,9 @@ interface Scene3DViewportProps {
   showPointCloud?: boolean;
   pointCloud?: PointCloudData | null;
   depthStats?: DepthStats | null;
+  scaleFactor?: number;
+  scaleLabel?: string | null;
+  arucoAnchor?: ArucoAnchor | null;
   unfoldProgress: number; // 0..1
   cameraMode: CameraViewMode;
   onChangeCameraMode: (mode: CameraViewMode) => void;
@@ -50,6 +58,8 @@ interface Scene3DViewportProps {
   modeBadge: string;
   onSelectObject: (id: string, shiftKey: boolean) => void;
   onHoverObject: (id: string | null) => void;
+  onCalibrateScale?: (nextFactor: number, label: string) => void;
+  onResetScale?: () => void;
 }
 
 // Reusable scratch objects outside useFrame (zero GC allocations per frame)
@@ -457,7 +467,8 @@ function exportPointCloudToPly(
   isolateObjIdx: number,
   sliceAxis: SliceAxisMode,
   sliceMin: number,
-  sliceMax: number
+  sliceMax: number,
+  scaleFactor = 1.0
 ): void {
   if (!pointCloud || pointCloud.count <= 0 || !pointCloud.positions_b64 || !pointCloud.colors_b64) {
     return;
@@ -484,9 +495,9 @@ function exportPointCloudToPly(
     if (isolateObjIdx > 0 && (!objIds || objIds[i] !== isolateObjIdx)) {
       continue;
     }
-    const px = pos[i * 3];
-    const py = pos[i * 3 + 1];
-    const pz = pos[i * 3 + 2];
+    const px = pos[i * 3] * scaleFactor;
+    const py = pos[i * 3 + 1] * scaleFactor;
+    const pz = pos[i * 3 + 2] * scaleFactor;
     if (sliceAxis !== 'off') {
       const c = sliceAxis === 'x' ? px : sliceAxis === 'y' ? py : pz;
       if (c < sliceMin || c > sliceMax) continue;
@@ -526,6 +537,150 @@ function exportPointCloudToPly(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+interface SurfaceCaliperProfile {
+  worldA: [number, number, number];
+  worldB: [number, number, number];
+  euclideanM: number;
+  deltaXyzM: [number, number, number];
+  slopeDeg: number;
+  surfaceArcM: number;
+  maxReliefMm: number;
+  profilePointsWorld: [number, number, number][];
+  elevationsMm: number[];
+}
+
+function computeSurfaceProfileFromCloud(
+  decodedPositions: Float32Array | null,
+  pointCount: number,
+  rawA: [number, number, number],
+  rawB: [number, number, number],
+  scaleFactor: number
+): SurfaceCaliperProfile {
+  const rawDx = rawB[0] - rawA[0];
+  const rawDy = rawB[1] - rawA[1];
+  const rawDz = rawB[2] - rawA[2];
+  const rawChordLen = Math.hypot(rawDx, rawDy, rawDz);
+
+  const worldA: [number, number, number] = [
+    rawA[0] * scaleFactor,
+    rawA[1] * scaleFactor,
+    rawA[2] * scaleFactor,
+  ];
+  const worldB: [number, number, number] = [
+    rawB[0] * scaleFactor,
+    rawB[1] * scaleFactor,
+    rawB[2] * scaleFactor,
+  ];
+  const deltaXyzM: [number, number, number] = [
+    rawDx * scaleFactor,
+    rawDy * scaleFactor,
+    rawDz * scaleFactor,
+  ];
+  const euclideanM = rawChordLen * scaleFactor;
+  const horizSpan = Math.hypot(deltaXyzM[0], deltaXyzM[2]);
+  const slopeDeg =
+    euclideanM > 1e-6
+      ? (Math.atan2(Math.abs(deltaXyzM[1]), Math.max(horizSpan, 1e-7)) * 180) / Math.PI
+      : 0;
+
+  if (!decodedPositions || pointCount <= 0 || rawChordLen <= 1e-4) {
+    return {
+      worldA,
+      worldB,
+      euclideanM,
+      deltaXyzM,
+      slopeDeg,
+      surfaceArcM: euclideanM,
+      maxReliefMm: 0,
+      profilePointsWorld: [worldA, worldB],
+      elevationsMm: [0, 0],
+    };
+  }
+
+  const numBins = 18;
+  const ux = rawDx / rawChordLen;
+  const uy = rawDy / rawChordLen;
+  const uz = rawDz / rawChordLen;
+  const cylRad = Math.max(0.025, 0.14 * rawChordLen);
+  const cylRad2 = cylRad * cylRad;
+
+  const bestDist2 = new Float64Array(numBins).fill(1e12);
+  const binX = new Float32Array(numBins);
+  const binY = new Float32Array(numBins);
+  const binZ = new Float32Array(numBins);
+  const binHas = new Uint8Array(numBins);
+
+  for (let i = 0; i < pointCount; i += 1) {
+    const px = decodedPositions[i * 3];
+    const py = decodedPositions[i * 3 + 1];
+    const pz = decodedPositions[i * 3 + 2];
+    const vx = px - rawA[0];
+    const vy = py - rawA[1];
+    const vz = pz - rawA[2];
+    const proj = vx * ux + vy * uy + vz * uz;
+    if (proj < 0 || proj > rawChordLen) continue;
+    const perpX = vx - proj * ux;
+    const perpY = vy - proj * uy;
+    const perpZ = vz - proj * uz;
+    const d2 = perpX * perpX + perpY * perpY + perpZ * perpZ;
+    if (d2 > cylRad2) continue;
+
+    const bIdx = Math.min(numBins - 1, Math.max(0, Math.floor((proj / rawChordLen) * numBins)));
+    if (d2 < bestDist2[bIdx]) {
+      bestDist2[bIdx] = d2;
+      binX[bIdx] = px;
+      binY[bIdx] = py;
+      binZ[bIdx] = pz;
+      binHas[bIdx] = 1;
+    }
+  }
+
+  const profilePointsWorld: [number, number, number][] = [worldA];
+  const elevationsMm: number[] = [0];
+  let maxReliefMm = 0;
+
+  for (let k = 0; k < numBins; k += 1) {
+    if (!binHas[k]) continue;
+    const wx = binX[k] * scaleFactor;
+    const wy = binY[k] * scaleFactor;
+    const wz = binZ[k] * scaleFactor;
+    profilePointsWorld.push([wx, wy, wz]);
+
+    // Perpendicular deviation from worldA -> worldB chord in millimeters
+    const rx = wx - worldA[0];
+    const ry = wy - worldA[1];
+    const rz = wz - worldA[2];
+    const cx = ry * deltaXyzM[2] - rz * deltaXyzM[1];
+    const cy = rz * deltaXyzM[0] - rx * deltaXyzM[2];
+    const cz = rx * deltaXyzM[1] - ry * deltaXyzM[0];
+    const perpMm = (Math.hypot(cx, cy, cz) / Math.max(euclideanM, 1e-6)) * 1000.0;
+    if (perpMm > maxReliefMm) maxReliefMm = perpMm;
+    elevationsMm.push(perpMm);
+  }
+  profilePointsWorld.push(worldB);
+  elevationsMm.push(0);
+
+  let surfaceArcM = 0;
+  for (let i = 1; i < profilePointsWorld.length; i += 1) {
+    const a = profilePointsWorld[i - 1];
+    const b = profilePointsWorld[i];
+    surfaceArcM += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  }
+  surfaceArcM = Math.max(euclideanM, surfaceArcM);
+
+  return {
+    worldA,
+    worldB,
+    euclideanM,
+    deltaXyzM,
+    slopeDeg,
+    surfaceArcM,
+    maxReliefMm,
+    profilePointsWorld,
+    elevationsMm,
+  };
 }
 
 const SURFEL_VERT = `
@@ -623,6 +778,9 @@ const MetricPointCloud: React.FC<{
   sliceAxis: SliceAxisMode;
   sliceMin: number;
   sliceMax: number;
+  caliperMode?: boolean;
+  scaleFactor?: number;
+  onPickSurfacePoint?: (rawPt: [number, number, number]) => void;
 }> = ({
   pointCloud,
   visible,
@@ -633,6 +791,9 @@ const MetricPointCloud: React.FC<{
   sliceAxis,
   sliceMin,
   sliceMax,
+  caliperMode = false,
+  scaleFactor = 1.0,
+  onPickSurfacePoint,
 }) => {
   const { size, gl } = useThree();
 
@@ -756,7 +917,14 @@ const MetricPointCloud: React.FC<{
 
   if (!visible || !geometry) return null;
 
-  return <points geometry={geometry} material={material} renderOrder={1} />;
+  const handlePointsClick = (e: ThreeEvent<MouseEvent>) => {
+    if (!caliperMode || !onPickSurfacePoint) return;
+    e.stopPropagation();
+    const inv = scaleFactor > 1e-5 ? 1 / scaleFactor : 1;
+    onPickSurfacePoint([e.point.x * inv, e.point.y * inv, e.point.z * inv]);
+  };
+
+  return <points geometry={geometry} material={material} renderOrder={1} onClick={handlePointsClick} />;
 };
 
 const MetricSurfaceMesh: React.FC<{
@@ -766,7 +934,20 @@ const MetricSurfaceMesh: React.FC<{
   sliceAxis: SliceAxisMode;
   sliceMin: number;
   sliceMax: number;
-}> = ({ pointCloud, visible, colorMode, sliceAxis, sliceMin, sliceMax }) => {
+  caliperMode?: boolean;
+  scaleFactor?: number;
+  onPickSurfacePoint?: (rawPt: [number, number, number]) => void;
+}> = ({
+  pointCloud,
+  visible,
+  colorMode,
+  sliceAxis,
+  sliceMin,
+  sliceMax,
+  caliperMode = false,
+  scaleFactor = 1.0,
+  onPickSurfacePoint,
+}) => {
   const surfaceMesh = pointCloud?.surface_mesh;
 
   const geometry = useMemo(() => {
@@ -831,8 +1012,15 @@ const MetricSurfaceMesh: React.FC<{
 
   if (!visible || !geometry) return null;
 
+  const handleMeshClick = (e: ThreeEvent<MouseEvent>) => {
+    if (!caliperMode || !onPickSurfacePoint) return;
+    e.stopPropagation();
+    const inv = scaleFactor > 1e-5 ? 1 / scaleFactor : 1;
+    onPickSurfacePoint([e.point.x * inv, e.point.y * inv, e.point.z * inv]);
+  };
+
   return (
-    <mesh geometry={geometry} renderOrder={0}>
+    <mesh geometry={geometry} renderOrder={0} onClick={handleMeshClick}>
       {colorMode === 'normals' ? (
         <meshNormalMaterial side={THREE.DoubleSide} clippingPlanes={clippingPlanes} />
       ) : (
@@ -1194,6 +1382,81 @@ const MeasurementRuler3D: React.FC<{ measurement: MeasurementState }> = ({
   );
 };
 
+const SurfaceCaliper3D: React.FC<{
+  pointA: [number, number, number] | null;
+  profile: SurfaceCaliperProfile | null;
+  scaleFactor: number;
+  scaleRatio: number;
+}> = ({ pointA, profile, scaleFactor, scaleRatio }) => {
+  if (!pointA && !profile) return null;
+
+  const worldA: [number, number, number] = profile
+    ? profile.worldA
+    : [pointA![0] * scaleFactor, pointA![1] * scaleFactor, pointA![2] * scaleFactor];
+
+  const sphereRadius = Math.max(0.012, 0.022 * scaleRatio);
+
+  if (!profile) {
+    return (
+      <group>
+        <mesh position={worldA} renderOrder={8}>
+          <sphereGeometry args={[sphereRadius, 14, 14]} />
+          <meshStandardMaterial color="#0F766E" />
+        </mesh>
+        <CanvasSpriteLabel
+          position={[worldA[0], worldA[1] + 0.08 * scaleRatio, worldA[2]]}
+          lines={['P1 · Origen']}
+          accentColor="#0F766E"
+          borderColor="#0F766E"
+          worldHeight={Math.max(0.08, 0.14 * scaleRatio)}
+        />
+      </group>
+    );
+  }
+
+  const mid: [number, number, number] = [
+    (profile.worldA[0] + profile.worldB[0]) / 2,
+    Math.max(profile.worldA[1], profile.worldB[1]) + Math.max(0.09, 0.15 * scaleRatio),
+    (profile.worldA[2] + profile.worldB[2]) / 2,
+  ];
+  const distCm = (profile.euclideanM * 100).toFixed(1);
+  const distMm = Math.round(profile.euclideanM * 1000);
+
+  return (
+    <group>
+      <mesh position={profile.worldA} renderOrder={8}>
+        <sphereGeometry args={[sphereRadius, 14, 14]} />
+        <meshStandardMaterial color="#0F766E" />
+      </mesh>
+      <mesh position={profile.worldB} renderOrder={8}>
+        <sphereGeometry args={[sphereRadius, 14, 14]} />
+        <meshStandardMaterial color="#BE123C" />
+      </mesh>
+      <Line points={[profile.worldA, profile.worldB]} color="#BE123C" lineWidth={2.4} />
+      {profile.profilePointsWorld.length > 2 && (
+        <Line
+          points={profile.profilePointsWorld}
+          color="#0F766E"
+          lineWidth={1.8}
+          dashed
+          dashSize={Math.max(0.015, 0.025 * scaleRatio)}
+          gapSize={Math.max(0.01, 0.015 * scaleRatio)}
+        />
+      )}
+      <CanvasSpriteLabel
+        position={mid}
+        lines={[
+          `${distCm} cm · ${distMm} mm`,
+          `Arco ${(profile.surfaceArcM * 100).toFixed(1)} cm · Relieve ${profile.maxReliefMm.toFixed(1)} mm`,
+        ]}
+        accentColor="#BE123C"
+        borderColor="#BE123C"
+        worldHeight={Math.max(0.11, 0.22 * scaleRatio)}
+      />
+    </group>
+  );
+};
+
 export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   imageBase64,
   imageMime = 'image/png',
@@ -1209,6 +1472,9 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   showPointCloud = true,
   pointCloud,
   depthStats,
+  scaleFactor = 1.0,
+  scaleLabel = null,
+  arucoAnchor = null,
   unfoldProgress,
   cameraMode,
   onChangeCameraMode,
@@ -1219,6 +1485,8 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   modeBadge,
   onSelectObject,
   onHoverObject,
+  onCalibrateScale,
+  onResetScale,
 }) => {
   const stageRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(true);
@@ -1324,6 +1592,59 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   const [sliceAxis, setSliceAxis] = useState<SliceAxisMode>('off');
   const [sliceRangePct, setSliceRangePct] = useState<[number, number]>([0, 100]);
 
+  const [caliperMode, setCaliperMode] = useState<boolean>(false);
+  const [caliperRawA, setCaliperRawA] = useState<[number, number, number] | null>(null);
+  const [caliperRawB, setCaliperRawB] = useState<[number, number, number] | null>(null);
+  const [referenceCmInput, setReferenceCmInput] = useState<string>('8.56');
+
+  const safeScaleFactor = scaleFactor > 0.05 && Number.isFinite(scaleFactor) ? scaleFactor : 1.0;
+
+  useEffect(() => {
+    setCaliperRawA(null);
+    setCaliperRawB(null);
+  }, [pointCloud]);
+
+  const decodedPositions = useMemo(() => {
+    if (!pointCloud || pointCloud.count <= 0 || !pointCloud.positions_b64) return null;
+    try {
+      const bytes = decodeBase64Bytes(pointCloud.positions_b64);
+      if (bytes.byteLength !== pointCloud.count * 12) return null;
+      return new Float32Array(bytes.buffer);
+    } catch {
+      return null;
+    }
+  }, [pointCloud]);
+
+  const caliperProfile = useMemo(() => {
+    if (!caliperRawA || !caliperRawB) return null;
+    return computeSurfaceProfileFromCloud(
+      decodedPositions,
+      pointCloud?.count ?? 0,
+      caliperRawA,
+      caliperRawB,
+      safeScaleFactor
+    );
+  }, [decodedPositions, pointCloud?.count, caliperRawA, caliperRawB, safeScaleFactor]);
+
+  const handlePickSurfacePoint = (rawPt: [number, number, number]) => {
+    if (!caliperMode) return;
+    if (!caliperRawA || (caliperRawA && caliperRawB)) {
+      setCaliperRawA(rawPt);
+      setCaliperRawB(null);
+    } else {
+      setCaliperRawB(rawPt);
+    }
+  };
+
+  const applyCalibrationWithCm = (refCm: number, refTitle: string) => {
+    if (!onCalibrateScale || !caliperProfile || caliperProfile.euclideanM <= 1e-4) return;
+    if (!Number.isFinite(refCm) || refCm <= 0.1) return;
+    const refMeters = refCm / 100.0;
+    const rawChordM = caliperProfile.euclideanM / safeScaleFactor;
+    const nextFactor = Math.min(10.0, Math.max(0.1, refMeters / Math.max(rawChordM, 1e-5)));
+    onCalibrateScale(Number(nextFactor.toFixed(5)), refTitle);
+  };
+
   const hasSurfaceMesh = Boolean(
     pointCloud?.surface_mesh && pointCloud.surface_mesh.triangle_count > 0
   );
@@ -1341,8 +1662,8 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   const { sliceMin, sliceMax } = useMemo(() => {
     if (sliceAxis === 'off') return { sliceMin: -100, sliceMax: 100 };
     const axIdx = sliceAxis === 'x' ? 0 : sliceAxis === 'y' ? 1 : 2;
-    const rawMin = pointCloud?.bounds_three?.min?.[axIdx] ?? -3.0;
-    const rawMax = pointCloud?.bounds_three?.max?.[axIdx] ?? 3.0;
+    const rawMin = (pointCloud?.bounds_three?.min?.[axIdx] ?? -3.0) * safeScaleFactor;
+    const rawMax = (pointCloud?.bounds_three?.max?.[axIdx] ?? 3.0) * safeScaleFactor;
     const lo = Math.min(rawMin, rawMax);
     const hi = Math.max(rawMin, rawMax);
     const span = Math.max(hi - lo, 0.04);
@@ -1350,7 +1671,7 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
       sliceMin: lo + (sliceRangePct[0] / 100) * span - 0.002,
       sliceMax: lo + (sliceRangePct[1] / 100) * span + 0.002,
     };
-  }, [sliceAxis, sliceRangePct, pointCloud?.bounds_three]);
+  }, [sliceAxis, sliceRangePct, pointCloud?.bounds_three, safeScaleFactor]);
 
   const collidingIds = useMemo(() => {
     const set = new Set<string>();
@@ -1515,6 +1836,21 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
               <Focus className="h-3 w-3" />
               <span>Aislar Cuerpo</span>
             </button>
+
+            {/* Surface Caliper 3D (2-click measurement + scale calibration) */}
+            <button
+              type="button"
+              onClick={() => setCaliperMode((v) => !v)}
+              title="Medir distancia 3D directa sobre surfels/malla (2 clics) y calibrar escala física"
+              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                caliperMode
+                  ? 'border-[#0F766E] bg-[#0F766E]/10 text-[#0F766E]'
+                  : 'border-[#E2E5EA] bg-[#FFFFFF] text-[#111827] hover:bg-[#F7F7F5]'
+              }`}
+            >
+              <Crosshair className="h-3 w-3" />
+              <span>Calibrador 3D</span>
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -1583,7 +1919,8 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
                   isolateObjIdx,
                   sliceAxis,
                   sliceMin,
-                  sliceMax
+                  sliceMax,
+                  safeScaleFactor
                 )
               }
               className="inline-flex items-center gap-1 rounded border border-[#E2E5EA] bg-[#FFFFFF] px-2 py-0.5 text-[10px] font-medium text-[#111827] transition-colors hover:bg-[#F7F7F5]"
@@ -1596,10 +1933,181 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
         </div>
       )}
 
+      {/* Interactive 3D Surface Caliper & Reference Scale Anchor Strip (Zero AI-Slop Editorial) */}
+      {(caliperMode ||
+        Math.abs(safeScaleFactor - 1.0) > 0.005 ||
+        Boolean(arucoAnchor?.detected)) && (
+        <div className="border-b border-[#E2E5EA] bg-[#FFFFFF] px-3.5 py-2 text-[11px] space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-[#111827]">
+                <Scale className="h-3.5 w-3.5 text-[#0F766E]" />
+                <span>Calibrador y Ancla de Escala</span>
+              </span>
+
+              {!caliperRawA && caliperMode && (
+                <span className="font-mono-tech text-[#0F766E]">
+                  Haz clic en P1 sobre la nube o malla 2.5D…
+                </span>
+              )}
+              {caliperRawA && !caliperRawB && (
+                <span className="font-mono-tech text-[#B45309]">
+                  P1 fijado · Haz clic en P2 para cerrar medición…
+                </span>
+              )}
+              {caliperProfile && (
+                <span className="font-mono-tech text-[#111827]">
+                  3D <strong className="text-[#BE123C]">{(caliperProfile.euclideanM * 100).toFixed(2)} cm</strong>{' '}
+                  ({Math.round(caliperProfile.euclideanM * 1000)} mm) · Arco{' '}
+                  <strong className="text-[#0F766E]">{(caliperProfile.surfaceArcM * 100).toFixed(2)} cm</strong>{' '}
+                  · Relieve <strong>{caliperProfile.maxReliefMm.toFixed(1)} mm</strong> · Pendiente{' '}
+                  <strong>{caliperProfile.slopeDeg.toFixed(1)}°</strong> · Δ[
+                  {(caliperProfile.deltaXyzM[0] * 100).toFixed(1)},{' '}
+                  {(caliperProfile.deltaXyzM[1] * 100).toFixed(1)},{' '}
+                  {(caliperProfile.deltaXyzM[2] * 100).toFixed(1)}] cm
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Inline SVG surface elevation sparkline */}
+              {caliperProfile && caliperProfile.elevationsMm.length >= 3 && (
+                <svg
+                  width="110"
+                  height="26"
+                  viewBox="0 0 110 26"
+                  aria-label="Perfil topográfico del corte superficial"
+                  className="border border-[#E2E5EA] bg-[#F7F7F5]"
+                >
+                  {(() => {
+                    const els = caliperProfile.elevationsMm;
+                    const maxE = Math.max(...els, 2);
+                    const ptsStr = els
+                      .map((v, i) => {
+                        const x = 4 + (i / Math.max(els.length - 1, 1)) * 102;
+                        const y = 22 - (v / maxE) * 18;
+                        return `${x.toFixed(1)},${y.toFixed(1)}`;
+                      })
+                      .join(' ');
+                    return (
+                      <polyline
+                        fill="none"
+                        stroke="#0F766E"
+                        strokeWidth="1.6"
+                        points={ptsStr}
+                      />
+                    );
+                  })()}
+                </svg>
+              )}
+
+              {(caliperRawA || caliperRawB) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCaliperRawA(null);
+                    setCaliperRawB(null);
+                  }}
+                  className="inline-flex items-center gap-1 rounded border border-[#E2E5EA] bg-[#F7F7F5] px-2 py-0.5 text-[10px] font-medium text-[#4B5563] hover:text-[#111827]"
+                >
+                  <X className="h-3 w-3" />
+                  <span>Limpiar P1/P2</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E2E5EA] pt-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <label htmlFor="ref-cm-input" className="text-[10px] font-medium text-[#4B5563]">
+                Ancla real (cm):
+              </label>
+              <input
+                id="ref-cm-input"
+                type="number"
+                min={0.5}
+                max={2000}
+                step={0.1}
+                value={referenceCmInput}
+                onChange={(e) => setReferenceCmInput(e.target.value)}
+                disabled={!onCalibrateScale}
+                className="font-mono-tech w-20 rounded border border-[#E2E5EA] bg-[#F7F7F5] px-2 py-0.5 text-[11px] text-[#111827] focus:border-[#1D4ED8] focus:outline-none"
+              />
+              {[
+                { label: 'Tarjeta 8.56', cm: 8.56 },
+                { label: 'Moneda 2.5', cm: 2.5 },
+                { label: 'A4 29.7', cm: 29.7 },
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    setReferenceCmInput(String(preset.cm));
+                    if (caliperProfile && caliperProfile.euclideanM > 1e-4) {
+                      applyCalibrationWithCm(preset.cm, `${preset.label} cm`);
+                    }
+                  }}
+                  className="font-mono-tech rounded border border-[#E2E5EA] bg-[#FFFFFF] px-1.5 py-0.5 text-[10px] text-[#4B5563] hover:border-[#1D4ED8] hover:text-[#111827]"
+                >
+                  {preset.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={!caliperProfile || !onCalibrateScale}
+                onClick={() => {
+                  const val = Number(referenceCmInput);
+                  applyCalibrationWithCm(val, `Referencia ${referenceCmInput} cm`);
+                }}
+                className="rounded border border-[#1D4ED8] bg-[#1D4ED8] px-2 py-0.5 text-[10px] font-medium text-white transition-colors hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Calibrar Escala
+              </button>
+
+              {arucoAnchor?.detected && onCalibrateScale && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onCalibrateScale(
+                      arucoAnchor.suggested_scale_factor,
+                      `ArUco ${arucoAnchor.dictionary} #${arucoAnchor.marker_id}`
+                    )
+                  }
+                  className="font-mono-tech rounded border border-[#0F766E] bg-[#FFFFFF] px-2 py-0.5 text-[10px] font-semibold text-[#0F766E] hover:bg-[#F7F7F5]"
+                >
+                  Aplicar ArUco #{arucoAnchor.marker_id} (×
+                  {arucoAnchor.suggested_scale_factor.toFixed(2)})
+                </button>
+              )}
+            </div>
+
+            <div className="font-mono-tech flex items-center gap-2 text-[10px] text-[#4B5563]">
+              <span>
+                Escala:{' '}
+                <strong className="text-[#111827]">×{safeScaleFactor.toFixed(3)}</strong>
+                {scaleLabel ? ` (${scaleLabel})` : ''}
+              </span>
+              {Math.abs(safeScaleFactor - 1.0) > 0.005 && onResetScale && (
+                <button
+                  type="button"
+                  onClick={onResetScale}
+                  className="inline-flex items-center gap-1 rounded border border-[#E2E5EA] bg-[#F7F7F5] px-1.5 py-0.5 text-[10px] font-medium text-[#111827] hover:bg-[#FFFFFF]"
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  <span>Restaurar 1.00×</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Off-screen pausing WebGL container */}
       <div
         ref={stageRef}
-        className="webgl-stage-container relative h-[430px] sm:h-[480px] w-full bg-[#F0F2F5]"
+        className={`webgl-stage-container relative h-[430px] sm:h-[480px] w-full bg-[#F0F2F5] ${
+          caliperMode ? 'cursor-crosshair' : ''
+        }`}
       >
         <Canvas
           dpr={[1, 2]}
@@ -1607,8 +2115,11 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
           frameloop={isVisible ? 'always' : 'demand'}
           camera={{ position: [2.4, 1.85, 0.8], fov: fovVDeg, near: 0.03, far: 80 }}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
-          onCreated={({ gl }) => {
+          onCreated={({ gl, raycaster }) => {
             gl.localClippingEnabled = true;
+            if (raycaster.params.Points) {
+              raycaster.params.Points.threshold = 0.035;
+            }
           }}
         >
           <color attach="background" args={['#F0F2F5']} />
@@ -1644,35 +2155,43 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
             cameraMode={cameraMode}
           />
 
-          <MetricSurfaceMesh
-            pointCloud={pointCloud}
-            visible={
-              Boolean(showPointCloud) &&
-              isolateObjIdx === 0 &&
-              (effectiveRenderMode === 'mesh' || effectiveRenderMode === 'hybrid')
-            }
-            colorMode={colorMode}
-            sliceAxis={sliceAxis}
-            sliceMin={sliceMin}
-            sliceMax={sliceMax}
-          />
+          <group scale={[safeScaleFactor, safeScaleFactor, safeScaleFactor]}>
+            <MetricSurfaceMesh
+              pointCloud={pointCloud}
+              visible={
+                Boolean(showPointCloud) &&
+                isolateObjIdx === 0 &&
+                (effectiveRenderMode === 'mesh' || effectiveRenderMode === 'hybrid')
+              }
+              colorMode={colorMode}
+              sliceAxis={sliceAxis}
+              sliceMin={sliceMin}
+              sliceMax={sliceMax}
+              caliperMode={caliperMode}
+              scaleFactor={safeScaleFactor}
+              onPickSurfacePoint={handlePickSurfacePoint}
+            />
 
-          <MetricPointCloud
-            pointCloud={pointCloud}
-            visible={
-              Boolean(showPointCloud) &&
-              (effectiveRenderMode === 'surfels' ||
-                effectiveRenderMode === 'hybrid' ||
-                isolateObjIdx > 0)
-            }
-            pointSize={pointSize}
-            pointScale={effectiveRenderMode === 'hybrid' ? pointScale * 0.8 : pointScale}
-            colorMode={colorMode}
-            isolateObjIdx={isolateObjIdx}
-            sliceAxis={sliceAxis}
-            sliceMin={sliceMin}
-            sliceMax={sliceMax}
-          />
+            <MetricPointCloud
+              pointCloud={pointCloud}
+              visible={
+                Boolean(showPointCloud) &&
+                (effectiveRenderMode === 'surfels' ||
+                  effectiveRenderMode === 'hybrid' ||
+                  isolateObjIdx > 0)
+              }
+              pointSize={pointSize}
+              pointScale={effectiveRenderMode === 'hybrid' ? pointScale * 0.8 : pointScale}
+              colorMode={colorMode}
+              isolateObjIdx={isolateObjIdx}
+              sliceAxis={sliceAxis}
+              sliceMin={sliceMin / safeScaleFactor}
+              sliceMax={sliceMax / safeScaleFactor}
+              caliperMode={caliperMode}
+              scaleFactor={safeScaleFactor}
+              onPickSurfacePoint={handlePickSurfacePoint}
+            />
+          </group>
 
           {/* Predicted OBBs */}
           {objects.map((obj) => (
@@ -1737,6 +2256,16 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
 
           {/* 3D Measurement ruler */}
           {measurement && <MeasurementRuler3D measurement={measurement} />}
+
+          {/* 3D Direct Surface Caliper */}
+          {(caliperRawA || caliperProfile) && (
+            <SurfaceCaliper3D
+              pointA={caliperRawA}
+              profile={caliperProfile}
+              scaleFactor={safeScaleFactor}
+              scaleRatio={scaleRatio}
+            />
+          )}
         </Canvas>
 
         {/* Quiet bottom HUD overlay */}
@@ -1747,6 +2276,14 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
             </span>
             <span className="text-[#CBD5E1]">|</span>
             <span>1u = 1.00m</span>
+            {Math.abs(safeScaleFactor - 1.0) > 0.005 && (
+              <>
+                <span className="text-[#CBD5E1]">|</span>
+                <span className="font-semibold text-[#0F766E]">
+                  Escala ×{safeScaleFactor.toFixed(2)}
+                </span>
+              </>
+            )}
             <span className="text-[#CBD5E1]">|</span>
             <span className="inline-flex items-center gap-1 text-[#0F766E]">
               <Eye className="h-3 w-3" />

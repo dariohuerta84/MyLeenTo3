@@ -16,6 +16,18 @@ export type AnalyzeEngine =
   | 'gemini_live'
   | 'salience_fallback';
 
+export type MoGeBackbone = 'vits' | 'vitb' | 'vitl';
+
+export interface ArucoAnchor {
+  detected: boolean;
+  dictionary: string;
+  marker_id: number;
+  corners_px: [number, number][];
+  measured_side_m: number;
+  reference_side_m: number;
+  suggested_scale_factor: number;
+}
+
 export interface ScalePriorCheck {
   object_id: string;
   label: string;
@@ -398,6 +410,9 @@ export interface AnalyzeResponse {
   fov_source?: string | null;
   exif_fov_h_deg?: number | null;
   estimated_moge_fov_h_deg?: number | null;
+  moge_backbone?: MoGeBackbone | string | null;
+  scale_factor?: number;
+  aruco_anchor?: ArucoAnchor | null;
   image_base64?: string;
   mime_type?: string;
   objects: SpatialObject[];
@@ -428,6 +443,24 @@ export interface ReprojectResponse {
   metrics?: SceneMetrics | null;
   fov_sweep?: FovSweepPoint[] | null;
   intrinsic_diagnostics?: IntrinsicDiagnostics | null;
+}
+
+export interface CalibrateScaleResponse {
+  scale_factor: number;
+  reference_label?: string | null;
+  width: number;
+  height: number;
+  fov_h_deg: number;
+  fov_v_deg: number;
+  objects: SpatialObject[];
+  gt_objects?: SpatialObject[] | null;
+  occlusion_matrix: OcclusionEntry[];
+  metrics?: SceneMetrics | null;
+  intrinsic_diagnostics?: IntrinsicDiagnostics | null;
+  depth_stats?: DepthStats | null;
+  real_photo_metrics?: RealPhotoMetrics | null;
+  scene_intelligence?: SceneIntelligence | null;
+  latency_ms: number;
 }
 
 export interface PairwiseGeometry {

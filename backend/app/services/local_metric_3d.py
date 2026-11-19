@@ -14,6 +14,7 @@ Provides:
 from __future__ import annotations
 
 import base64
+import gc
 import inspect
 import io
 import math
@@ -32,6 +33,7 @@ from ..core.real_photo_metrics import (
     compute_specular_mask,
     fit_ransac_dominant_plane,
 )
+from ..core.scale_calibration import detect_aruco_scale_anchor
 
 try:
     import cv2  # type: ignore
@@ -39,6 +41,16 @@ except Exception:  # pragma: no cover - optional in CPU-only CI
     cv2 = None  # type: ignore
 
 MOGE_MODEL_ID = os.getenv("MYLEENTO3_MOGE_MODEL", "Ruicheng/moge-2-vits-normal")
+MOGE_BACKBONE_REPOS: dict[str, str] = {
+    "vits": MOGE_MODEL_ID,
+    "vitb": "Ruicheng/moge-2-vitb-normal",
+    "vitl": "Ruicheng/moge-2-vitl-normal",
+}
+MOGE_BACKBONE_MAX_SIDE: dict[str, int] = {
+    "vits": 768,
+    "vitb": 896,
+    "vitl": 1024,
+}
 YOLOE_PF_WEIGHTS = os.getenv("MYLEENTO3_YOLOE_PF_WEIGHTS", "yoloe-11s-seg-pf.pt")
 YOLOE_OV_WEIGHTS = os.getenv("MYLEENTO3_YOLOE_OV_WEIGHTS", "yoloe-11s-seg.pt")
 YOLO_FALLBACK_WEIGHTS = os.getenv("MYLEENTO3_YOLO_FALLBACK", "yolo11n-seg.pt")
@@ -78,6 +90,7 @@ DEFAULT_OPEN_VOCAB_CLASSES: list[str] = [
 
 _MODEL_LOCK = threading.Lock()
 _MOGE_MODEL: Any = None
+_MOGE_ACTIVE_BACKBONE: Optional[str] = None
 _SEG_MODEL: Any = None
 _SEG_MODEL_KIND: str = "unloaded"
 _PF_MODEL: Any = None
@@ -194,9 +207,10 @@ def get_local_3d_status() -> dict[str, Any]:
     except Exception:
         dev_name = "cpu"
 
+    active_repo = MOGE_BACKBONE_REPOS.get(_MOGE_ACTIVE_BACKBONE or "vits", MOGE_MODEL_ID)
     seg_name = _SEG_MODEL_KIND if _SEG_MODEL_KIND != "unloaded" else f"YOLOE-OV ({YOLOE_OV_WEIGHTS})"
     pf_name = _PF_MODEL_KIND if _PF_MODEL_KIND != "unloaded" else f"YOLOE-pf ({YOLOE_PF_WEIGHTS}, 4585 cl.)"
-    models_list = [MOGE_MODEL_ID, seg_name]
+    models_list = [active_repo, seg_name]
     if pf_name not in models_list and YOLOE_PF_WEIGHTS:
         models_list.append(pf_name)
     return {
@@ -204,6 +218,44 @@ def get_local_3d_status() -> dict[str, Any]:
         "device": dev_name,
         "models": models_list,
     }
+
+
+def _resolve_moge_backbone(backbone: Optional[str]) -> str:
+    bb = str(backbone or "vits").strip().lower()
+    return bb if bb in MOGE_BACKBONE_REPOS else "vits"
+
+
+def _ensure_moge_model_locked(backbone: str = "vits") -> tuple[Any, str, str, str]:
+    """Load or safely hot-swap MoGe-2 backbone inside `_MODEL_LOCK` without retaining two ViTs in VRAM."""
+    global _MOGE_MODEL, _MOGE_ACTIVE_BACKBONE, _LOCAL_DEVICE, _DEVICE_LABEL
+
+    import torch
+    from moge.model.v2 import MoGeModel
+
+    bb = _resolve_moge_backbone(backbone)
+    repo_id = MOGE_BACKBONE_REPOS[bb]
+
+    if _MOGE_MODEL is None or _MOGE_ACTIVE_BACKBONE != bb:
+        if _MOGE_MODEL is not None:
+            try:
+                _MOGE_MODEL = None
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                _MOGE_MODEL = None
+
+        if torch.cuda.is_available():
+            _LOCAL_DEVICE = "cuda"
+            _DEVICE_LABEL = torch.cuda.get_device_name(0)
+        else:
+            _LOCAL_DEVICE = "cpu"
+            _DEVICE_LABEL = "CPU"
+
+        _MOGE_MODEL = MoGeModel.from_pretrained(repo_id).to(_LOCAL_DEVICE).eval()
+        _MOGE_ACTIVE_BACKBONE = bb
+
+    return _MOGE_MODEL, _LOCAL_DEVICE, _DEVICE_LABEL, bb
 
 
 def _load_prompt_free_segmenter(device: Optional[str] = None) -> tuple[Any, str]:
@@ -232,25 +284,16 @@ def _load_prompt_free_segmenter(device: Optional[str] = None) -> tuple[Any, str]
 
 def _load_moge2_and_segmenter(
     custom_classes: Optional[list[str]] = None,
+    moge_backbone: str = "vits",
 ) -> tuple[Any, Any, str, str]:
-    """Thread-safe lazy loader for MoGe-2 ViT-S and Ultralytics YOLOE/YOLO-seg."""
-    global _MOGE_MODEL, _SEG_MODEL, _SEG_MODEL_KIND, _OV_MODEL, _OV_CLASSES_CACHE, _LOCAL_DEVICE, _DEVICE_LABEL
+    """Thread-safe lazy loader for MoGe-2 (ViT-S/B/L) and Ultralytics YOLOE/YOLO-seg."""
+    global _SEG_MODEL, _SEG_MODEL_KIND, _OV_MODEL, _OV_CLASSES_CACHE
 
-    import torch
-    from moge.model.v2 import MoGeModel
     from ultralytics import YOLO
 
     with _MODEL_LOCK:
-        if _MOGE_MODEL is None:
-            if torch.cuda.is_available():
-                _LOCAL_DEVICE = "cuda"
-                _DEVICE_LABEL = torch.cuda.get_device_name(0)
-            else:
-                _LOCAL_DEVICE = "cpu"
-                _DEVICE_LABEL = "CPU"
-
-            model = MoGeModel.from_pretrained(MOGE_MODEL_ID).to(_LOCAL_DEVICE).eval()
-            _MOGE_MODEL = model
+        moge_model, local_dev, dev_lbl, bb = _ensure_moge_model_locked(moge_backbone)
+        repo_short = MOGE_BACKBONE_REPOS[bb].split("/")[-1]
 
         target_classes = custom_classes if custom_classes else DEFAULT_OPEN_VOCAB_CLASSES
         try:
@@ -259,7 +302,7 @@ def _load_moge2_and_segmenter(
             if _OV_MODEL is None:
                 _OV_MODEL = YOLOE(YOLOE_OV_WEIGHTS)
                 if hasattr(_OV_MODEL, "to"):
-                    _OV_MODEL.to(_LOCAL_DEVICE)
+                    _OV_MODEL.to(local_dev)
             target_tuple = tuple(target_classes)
             if _OV_CLASSES_CACHE != target_tuple:
                 if hasattr(_OV_MODEL, "get_text_pe"):
@@ -270,10 +313,10 @@ def _load_moge2_and_segmenter(
                 _OV_CLASSES_CACHE = target_tuple
             _SEG_MODEL_KIND = f"YOLOE-OV ({YOLOE_OV_WEIGHTS})"
             return (
-                _MOGE_MODEL,
+                moge_model,
                 _OV_MODEL,
-                _LOCAL_DEVICE,
-                f"{MOGE_MODEL_ID.split('/')[-1]} + {_SEG_MODEL_KIND} ({_DEVICE_LABEL})",
+                local_dev,
+                f"{repo_short} + {_SEG_MODEL_KIND} ({dev_lbl})",
             )
         except Exception:
             pass
@@ -284,13 +327,13 @@ def _load_moge2_and_segmenter(
 
                 _SEG_MODEL = YOLOE(YOLOE_PF_WEIGHTS)
                 if hasattr(_SEG_MODEL, "to"):
-                    _SEG_MODEL.to(_LOCAL_DEVICE)
+                    _SEG_MODEL.to(local_dev)
                 _SEG_MODEL_KIND = f"YOLOE-pf ({YOLOE_PF_WEIGHTS})"
             except Exception:
                 _SEG_MODEL = YOLO(YOLO_FALLBACK_WEIGHTS)
                 _SEG_MODEL_KIND = f"YOLO-seg ({YOLO_FALLBACK_WEIGHTS})"
 
-        return _MOGE_MODEL, _SEG_MODEL, _LOCAL_DEVICE, f"{MOGE_MODEL_ID.split('/')[-1]} + {_SEG_MODEL_KIND} ({_DEVICE_LABEL})"
+        return moge_model, _SEG_MODEL, local_dev, f"{repo_short} + {_SEG_MODEL_KIND} ({dev_lbl})"
 
 
 def compute_depth_stats(depth_m: np.ndarray, valid_mask: np.ndarray) -> dict[str, float]:
@@ -863,37 +906,25 @@ def _depth_layered_fallback_objects(
     return results
 
 
-def _load_moge2_only() -> tuple[Any, str, str]:
-    """Thread-safe lazy loader for MoGe-2 ViT-S without triggering open-vocab text encoding."""
-    global _MOGE_MODEL, _LOCAL_DEVICE, _DEVICE_LABEL
-
-    import torch
-    from moge.model.v2 import MoGeModel
-
+def _load_moge2_only(backbone: str = "vits") -> tuple[Any, str, str, str]:
+    """Thread-safe lazy loader for MoGe-2 backbone without triggering open-vocab text encoding."""
     with _MODEL_LOCK:
-        if _MOGE_MODEL is None:
-            if torch.cuda.is_available():
-                _LOCAL_DEVICE = "cuda"
-                _DEVICE_LABEL = torch.cuda.get_device_name(0)
-            else:
-                _LOCAL_DEVICE = "cpu"
-                _DEVICE_LABEL = "CPU"
-
-            _MOGE_MODEL = MoGeModel.from_pretrained(MOGE_MODEL_ID).to(_LOCAL_DEVICE).eval()
-
-        return _MOGE_MODEL, _LOCAL_DEVICE, f"{MOGE_MODEL_ID.split('/')[-1]} ({_DEVICE_LABEL})"
+        model, dev, dev_lbl, bb = _ensure_moge_model_locked(backbone)
+        repo_short = MOGE_BACKBONE_REPOS[bb].split("/")[-1]
+        return model, dev, f"{repo_short} ({dev_lbl})", bb
 
 
 def _run_moge2_inference(
     rgb_pil: Image.Image,
     fov_hint_deg: Optional[float] = None,
+    moge_backbone: str = "vits",
 ) -> dict[str, Any]:
-    """Run MoGe-2 ViT-S on scaled RGB image and return OpenCV points, depth, valid mask, and FOV."""
+    """Run MoGe-2 (ViT-S/B/L) on scaled RGB image and return OpenCV points, depth, valid mask, and FOV."""
     import torch
 
-    model, device, device_desc = _load_moge2_only()
+    model, device, device_desc, bb = _load_moge2_only(backbone=moge_backbone)
     w0, h0 = rgb_pil.size
-    max_side = 768
+    max_side = MOGE_BACKBONE_MAX_SIDE.get(bb, 768)
     if max(w0, h0) > max_side:
         scale = max_side / float(max(w0, h0))
         nw = max(64, int(round(w0 * scale)))
@@ -973,9 +1004,28 @@ def _run_moge2_inference(
         "proc_width": int(rgb_u8.shape[1]),
         "proc_height": int(rgb_u8.shape[0]),
         "moge_fov_h_deg": round(moge_fov_h, 2),
+        "moge_backbone": bb,
         "device": device,
         "device_desc": device_desc,
     }
+
+
+def _safe_detect_aruco_anchor(
+    rgb_u8: np.ndarray,
+    points_cv: np.ndarray,
+    valid_mask: np.ndarray,
+    aruco_marker_size_cm: Optional[float],
+) -> Optional[dict[str, Any]]:
+    try:
+        marker_m = max(0.01, float(aruco_marker_size_cm or 5.0) / 100.0)
+        return detect_aruco_scale_anchor(
+            rgb_u8,
+            points_cv,
+            valid_mask,
+            marker_size_m=marker_m,
+        )
+    except Exception:
+        return None
 
 
 def extract_depth_and_point_cloud(
@@ -983,11 +1033,13 @@ def extract_depth_and_point_cloud(
     *,
     fov_override_deg: Optional[float] = None,
     auto_fov: bool = True,
+    moge_backbone: str = "vits",
+    aruco_marker_size_cm: Optional[float] = None,
 ) -> dict[str, Any]:
-    """Run MoGe-2 only to attach metric depth map, point cloud, and EXIF/MoGe FOV info."""
+    """Run MoGe-2 only to attach metric depth map, point cloud, ArUco anchor, and EXIF/MoGe FOV info."""
     rgb_pil, w, h, exif_fov_h_deg = extract_exif_image_info(image_base64)
     hint = exif_fov_h_deg if auto_fov else fov_override_deg
-    moge_out = _run_moge2_inference(rgb_pil, fov_hint_deg=hint)
+    moge_out = _run_moge2_inference(rgb_pil, fov_hint_deg=hint, moge_backbone=moge_backbone)
 
     moge_fov = moge_out["moge_fov_h_deg"]
     if not auto_fov and fov_override_deg is not None:
@@ -1023,6 +1075,12 @@ def extract_depth_and_point_cloud(
         ransac_plane=real_metrics.get("ransac_plane"),
         include_surface_mesh=True,
     )
+    aruco_anchor = _safe_detect_aruco_anchor(
+        moge_out["rgb_u8"],
+        moge_out["points_cv"],
+        moge_out["valid_mask"],
+        aruco_marker_size_cm,
+    )
     return {
         "width": w,
         "height": h,
@@ -1030,6 +1088,8 @@ def extract_depth_and_point_cloud(
         "fov_source": fov_source,
         "exif_fov_h_deg": exif_fov_h_deg,
         "estimated_moge_fov_h_deg": moge_fov,
+        "moge_backbone": moge_out.get("moge_backbone", "vits"),
+        "aruco_anchor": aruco_anchor,
         "depth_map_base64": depth_b64,
         "depth_stats": depth_stats,
         "point_cloud": point_cloud,
@@ -1337,6 +1397,8 @@ def run_local_metric_3d(
     custom_prompt: Optional[str] = None,
     vlm_discovery: Optional[dict[str, Any]] = None,
     enable_prompt_free: bool = True,
+    moge_backbone: str = "vits",
+    aruco_marker_size_cm: Optional[float] = None,
 ) -> dict[str, Any]:
     """Full hybrid/local GPU/CPU RGB -> Metric Depth + Adaptive Discovery/YOLOE -> 9-DOF 3D OBBs + Surfels."""
     from app.services.scene_intelligence import infer_local_scene_discovery, parse_custom_prompt_classes
@@ -1344,7 +1406,7 @@ def run_local_metric_3d(
     t0 = time.perf_counter()
     rgb_pil, w, h, exif_fov_h_deg = extract_exif_image_info(image_base64)
     hint = exif_fov_h_deg if auto_fov else fov_override_deg
-    moge_out = _run_moge2_inference(rgb_pil, fov_hint_deg=hint)
+    moge_out = _run_moge2_inference(rgb_pil, fov_hint_deg=hint, moge_backbone=moge_backbone)
 
     moge_fov = moge_out["moge_fov_h_deg"]
     if not auto_fov and fov_override_deg is not None:
@@ -1412,7 +1474,10 @@ def run_local_metric_3d(
         target_classes = list(discovery_meta["active_vocabulary"])
         vlm_objects_2d = []
 
-    _, seg_model, device, model_desc = _load_moge2_and_segmenter(custom_classes=target_classes)
+    _, seg_model, device, model_desc = _load_moge2_and_segmenter(
+        custom_classes=target_classes,
+        moge_backbone=moge_backbone,
+    )
     if pf_used_flag:
         model_desc = f"{model_desc} + YOLOE-pf (4585 cl.)"
 
@@ -1571,10 +1636,19 @@ def run_local_metric_3d(
     else:
         mode_name = "moge2_yoloe_gpu" if device.startswith("cuda") else "moge2_yoloe_cpu"
 
+    aruco_anchor = _safe_detect_aruco_anchor(
+        rgb_u8,
+        moge_out["points_cv"],
+        moge_out["valid_mask"],
+        aruco_marker_size_cm,
+    )
+
     domain_es = str(discovery_meta.get("domain_label_es") or "Inspección Física General")
     return {
         "mode": mode_name,
         "model_desc": model_desc,
+        "moge_backbone": moge_out.get("moge_backbone", _resolve_moge_backbone(moge_backbone)),
+        "aruco_anchor": aruco_anchor,
         "width": w,
         "height": h,
         "image_base64": oriented_b64,

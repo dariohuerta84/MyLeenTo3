@@ -2,10 +2,13 @@ import type {
   AnalyzeEngine,
   AnalyzeResponse,
   BenchmarkScene,
+  CalibrateScaleResponse,
   CompareModelsResponse,
   CopilotResponse,
+  DepthStats,
   GeminiModelId,
   HealthResponse,
+  MoGeBackbone,
   MultiFrameAuditResult,
   MultiFrameDemoResponse,
   MultiFrameItem,
@@ -75,6 +78,8 @@ export interface AnalyzePayload {
   engine?: AnalyzeEngine;
   auto_fov?: boolean;
   enable_diagnosis?: boolean;
+  moge_backbone?: MoGeBackbone;
+  aruco_marker_size_cm?: number;
 }
 
 export async function analyzeScene(
@@ -113,6 +118,37 @@ export async function reprojectScene(
   payload: ReprojectPayload
 ): Promise<ReprojectResponse> {
   return requestJson<ReprojectResponse>('/reproject', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      objects: payload.objects.map(toObjectInput),
+      gt_objects: payload.gt_objects
+        ? payload.gt_objects.map(toObjectInput)
+        : undefined,
+    }),
+  });
+}
+
+export interface CalibrateScalePayload {
+  objects: SpatialObject[];
+  gt_objects?: SpatialObject[] | null;
+  image_base64?: string | null;
+  width: number;
+  height: number;
+  fov_h_deg: number;
+  scale_factor?: number;
+  measured_distance_m?: number;
+  reference_distance_m?: number;
+  reference_label?: string | null;
+  depth_stats?: DepthStats | null;
+  real_photo_metrics?: RealPhotoMetrics | null;
+  scene_intelligence?: SceneIntelligence | null;
+}
+
+export async function calibrateScale(
+  payload: CalibrateScalePayload
+): Promise<CalibrateScaleResponse> {
+  return requestJson<CalibrateScaleResponse>('/calibrate-scale', {
     method: 'POST',
     body: JSON.stringify({
       ...payload,

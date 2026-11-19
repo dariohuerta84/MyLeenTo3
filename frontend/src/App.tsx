@@ -3,6 +3,7 @@ import type {
   AnalyzeEngine,
   AnalyzeResponse,
   AppSection,
+  ArucoAnchor,
   BenchmarkScene,
   CameraViewMode,
   DepthStats,
@@ -10,6 +11,7 @@ import type {
   GeminiModelId,
   IntrinsicDiagnostics,
   MeasurementState,
+  MoGeBackbone,
   OcclusionEntry,
   PointCloudData,
   RealPhotoMetrics,
@@ -21,6 +23,7 @@ import type {
 } from './types/spatial';
 import {
   analyzeScene,
+  calibrateScale,
   fetchBenchmarks,
   fetchHealth,
   measurePair,
@@ -57,6 +60,7 @@ export function App() {
   const [selectedModel, setSelectedModel] = useState<GeminiModelId>('gemini-4-hydrogen');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high');
   const [selectedEngine, setSelectedEngine] = useState<AnalyzeEngine>('auto');
+  const [mogeBackbone, setMogeBackbone] = useState<MoGeBackbone>('vits');
   const [customPrompt, setCustomPrompt] = useState<string>('');
 
   // Privacy-first in-memory API key only (never stored in localStorage/cookies)
@@ -90,6 +94,9 @@ export function App() {
   const [fovSource, setFovSource] = useState<string | null>(null);
   const [realPhotoMetrics, setRealPhotoMetrics] = useState<RealPhotoMetrics | null>(null);
   const [sceneIntelligence, setSceneIntelligence] = useState<SceneIntelligence | null>(null);
+  const [scaleFactor, setScaleFactor] = useState<number>(1.0);
+  const [scaleLabel, setScaleLabel] = useState<string | null>(null);
+  const [arucoAnchor, setArucoAnchor] = useState<ArucoAnchor | null>(null);
   const [fovManualOverride, setFovManualOverride] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [modeBadge, setModeBadge] = useState<string>('calibrated_demo');
@@ -115,6 +122,10 @@ export function App() {
   const objectsRef = useRef<SpatialObject[]>([]);
   const gtObjectsRef = useRef<SpatialObject[] | null>(null);
   const imageBase64Ref = useRef<string>('');
+  const baseObjectsRef = useRef<SpatialObject[]>([]);
+  const baseDepthStatsRef = useRef<DepthStats | null>(null);
+  const baseRealPhotoMetricsRef = useRef<RealPhotoMetrics | null>(null);
+  const baseSceneIntelligenceRef = useRef<SceneIntelligence | null>(null);
 
   useEffect(() => {
     objectsRef.current = objects;
@@ -144,8 +155,13 @@ export function App() {
     setDepthStats(null);
     setFovSource(null);
     setRealPhotoMetrics(null);
+    setArucoAnchor(null);
+    setScaleFactor(1.0);
+    setScaleLabel(null);
     setShowDepthMap(false);
     setFovManualOverride(false);
+    baseDepthStatsRef.current = null;
+    baseRealPhotoMetricsRef.current = null;
   }, []);
 
   const applyLocal3DTelemetry = useCallback((res: AnalyzeResponse) => {
@@ -154,6 +170,9 @@ export function App() {
     setDepthStats(res.depth_stats ?? null);
     setFovSource(res.fov_source ?? null);
     setRealPhotoMetrics(res.real_photo_metrics ?? null);
+    setArucoAnchor(res.aruco_anchor ?? null);
+    baseDepthStatsRef.current = res.depth_stats ?? null;
+    baseRealPhotoMetricsRef.current = res.real_photo_metrics ?? null;
     if (res.image_base64) {
       setImageBase64(res.image_base64);
       setImageMime(res.mime_type || 'image/png');
@@ -212,6 +231,10 @@ export function App() {
         setFovSweep(res.fov_sweep ?? null);
         setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
         setSceneIntelligence(res.scene_intelligence ?? null);
+        baseObjectsRef.current = res.objects ?? [];
+        baseSceneIntelligenceRef.current = res.scene_intelligence ?? null;
+        setScaleFactor(1.0);
+        setScaleLabel(null);
         setModeBadge(res.mode ?? 'calibrated_demo');
         setNotice(res.notice ?? null);
         if (target.id === 'occlusion_corridor') {
@@ -329,6 +352,7 @@ export function App() {
               fov_h_deg: fovHDeg,
               custom_prompt: customPrompt.trim() || undefined,
               engine: selectedEngine,
+              moge_backbone: mogeBackbone,
               auto_fov: true,
               enable_diagnosis: true,
               max_objects: 10,
@@ -342,6 +366,10 @@ export function App() {
           setFovSweep(res.fov_sweep ?? null);
           setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
           setSceneIntelligence(res.scene_intelligence ?? null);
+          baseObjectsRef.current = res.objects ?? [];
+          baseSceneIntelligenceRef.current = res.scene_intelligence ?? null;
+          setScaleFactor(1.0);
+          setScaleLabel(null);
           setModeBadge(res.mode ?? 'calibrated_demo');
           setNotice(res.notice ?? null);
           applyLocal3DTelemetry(res);
@@ -385,6 +413,7 @@ export function App() {
           fov_h_deg: fovHDeg,
           custom_prompt: customPrompt.trim() || undefined,
           engine: selectedEngine,
+          moge_backbone: mogeBackbone,
           auto_fov: !fovManualOverride,
           enable_diagnosis: true,
           max_objects: 10,
@@ -398,6 +427,10 @@ export function App() {
       setFovSweep(res.fov_sweep ?? null);
       setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
       setSceneIntelligence(res.scene_intelligence ?? null);
+      baseObjectsRef.current = res.objects ?? [];
+      baseSceneIntelligenceRef.current = res.scene_intelligence ?? null;
+      setScaleFactor(1.0);
+      setScaleLabel(null);
       setModeBadge(res.mode ?? 'live');
       setNotice(res.notice ?? null);
       applyLocal3DTelemetry(res);
@@ -449,6 +482,45 @@ export function App() {
     },
     [width, height]
   );
+
+  const handleCalibrateScale = useCallback(
+    async (nextFactor: number, label: string) => {
+      const baseObjs = baseObjectsRef.current.length > 0 ? baseObjectsRef.current : objectsRef.current;
+      try {
+        const res = await calibrateScale({
+          objects: baseObjs,
+          gt_objects: gtObjectsRef.current,
+          image_base64: imageBase64Ref.current || undefined,
+          width,
+          height,
+          fov_h_deg: fovHDeg,
+          scale_factor: nextFactor,
+          reference_label: label,
+          depth_stats: baseDepthStatsRef.current,
+          real_photo_metrics: baseRealPhotoMetricsRef.current,
+          scene_intelligence: baseSceneIntelligenceRef.current,
+        });
+        setObjects(res.objects ?? []);
+        if (res.gt_objects !== undefined) setGtObjects(res.gt_objects);
+        setOcclusionMatrix(res.occlusion_matrix ?? []);
+        if (res.metrics !== undefined) setMetrics(res.metrics);
+        if (res.intrinsic_diagnostics !== undefined) setIntrinsicDiagnostics(res.intrinsic_diagnostics);
+        if (res.depth_stats !== undefined) setDepthStats(res.depth_stats);
+        if (res.real_photo_metrics !== undefined) setRealPhotoMetrics(res.real_photo_metrics);
+        if (res.scene_intelligence !== undefined) setSceneIntelligence(res.scene_intelligence);
+        setScaleFactor(res.scale_factor);
+        setScaleLabel(Math.abs(res.scale_factor - 1.0) > 0.005 ? label : null);
+        setMeasurement(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Error al calibrar escala');
+      }
+    },
+    [width, height, fovHDeg]
+  );
+
+  const handleResetScale = useCallback(() => {
+    handleCalibrateScale(1.0, 'Escala original 1.00×');
+  }, [handleCalibrateScale]);
 
   const runPairMeasurement = useCallback(
     async (idA: string, idB: string) => {
@@ -604,7 +676,11 @@ export function App() {
             thinkingLevel={thinkingLevel}
             selectedModel={selectedModel}
             selectedEngine={selectedEngine}
+            mogeBackbone={mogeBackbone}
             customPrompt={customPrompt}
+            scaleFactor={scaleFactor}
+            scaleLabel={scaleLabel}
+            arucoAnchor={arucoAnchor}
             unfoldProgress={unfoldProgress}
             showGroundTruth={showGroundTruth}
             showOcclusionRays={showOcclusionRays}
@@ -640,7 +716,10 @@ export function App() {
             onChangeFovH={handleChangeFovH}
             onChangeThinkingLevel={setThinkingLevel}
             onChangeEngine={setSelectedEngine}
+            onChangeMogeBackbone={setMogeBackbone}
             onChangeCustomPrompt={setCustomPrompt}
+            onCalibrateScale={handleCalibrateScale}
+            onResetScale={handleResetScale}
             onChangeUnfoldProgress={setUnfoldProgress}
             onToggleGroundTruth={() => setShowGroundTruth((v) => !v)}
             onToggleOcclusionRays={() => setShowOcclusionRays((v) => !v)}

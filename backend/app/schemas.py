@@ -12,6 +12,7 @@ AllowedModel = Literal[
 ]
 
 ThinkingLevel = Literal["low", "medium", "high"]
+MoGeBackbone = Literal["vits", "vitb", "vitl"]
 
 SUPPORTED_MODELS: list[str] = [
     "gemini-4-hydrogen",
@@ -133,6 +134,8 @@ class AnalyzeRequest(BaseModel):
     engine: Literal["auto", "hybrid_vlm_3d", "moge2_local", "gemini_live", "salience_fallback"] = "auto"
     auto_fov: bool = True
     enable_diagnosis: bool = True
+    moge_backbone: MoGeBackbone = "vits"
+    aruco_marker_size_cm: Optional[float] = Field(default=None, ge=1.0, le=100.0)
 
 
 class AnalyzeResponse(BaseModel):
@@ -148,6 +151,9 @@ class AnalyzeResponse(BaseModel):
     fov_source: Optional[str] = None
     exif_fov_h_deg: Optional[float] = None
     estimated_moge_fov_h_deg: Optional[float] = None
+    moge_backbone: Optional[str] = None
+    scale_factor: float = 1.0
+    aruco_anchor: Optional[dict[str, Any]] = None
     image_base64: str
     mime_type: str
     scene_summary: str = ""
@@ -188,6 +194,40 @@ class ReprojectResponse(BaseModel):
     metrics: Optional[dict[str, Any]] = None
     fov_sweep: Optional[list[dict[str, Any]]] = None
     intrinsic_diagnostics: Optional[dict[str, Any]] = None
+    latency_ms: float
+
+
+class CalibrateScaleRequest(BaseModel):
+    objects: list[ObjectInput]
+    gt_objects: Optional[list[ObjectInput]] = None
+    image_base64: Optional[str] = None
+    width: int = Field(..., gt=0)
+    height: int = Field(..., gt=0)
+    fov_h_deg: float = Field(..., ge=20.0, le=140.0)
+    scale_factor: Optional[float] = Field(default=None, gt=0.0, le=20.0)
+    measured_distance_m: Optional[float] = Field(default=None, gt=0.0)
+    reference_distance_m: Optional[float] = Field(default=None, gt=0.0)
+    reference_label: Optional[str] = None
+    depth_stats: Optional[dict[str, float]] = None
+    real_photo_metrics: Optional[dict[str, Any]] = None
+    scene_intelligence: Optional[dict[str, Any]] = None
+
+
+class CalibrateScaleResponse(BaseModel):
+    scale_factor: float
+    reference_label: Optional[str] = None
+    width: int
+    height: int
+    fov_h_deg: float
+    fov_v_deg: float
+    objects: list[EnrichedObject]
+    gt_objects: Optional[list[EnrichedObject]] = None
+    occlusion_matrix: list[dict[str, Any]]
+    metrics: Optional[dict[str, Any]] = None
+    intrinsic_diagnostics: Optional[dict[str, Any]] = None
+    depth_stats: Optional[dict[str, float]] = None
+    real_photo_metrics: Optional[dict[str, Any]] = None
+    scene_intelligence: Optional[dict[str, Any]] = None
     latency_ms: float
 
 

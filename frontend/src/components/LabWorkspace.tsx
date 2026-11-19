@@ -15,12 +15,14 @@ import {
 } from 'lucide-react';
 import type {
   AnalyzeEngine,
+  ArucoAnchor,
   BenchmarkScene,
   CameraViewMode,
   DepthStats,
   GeminiModelId,
   IntrinsicDiagnostics,
   MeasurementState,
+  MoGeBackbone,
   OcclusionEntry,
   PointCloudData,
   RealPhotoMetrics,
@@ -48,7 +50,11 @@ interface LabWorkspaceProps {
   thinkingLevel: ThinkingLevel;
   selectedModel: GeminiModelId;
   selectedEngine: AnalyzeEngine;
+  mogeBackbone: MoGeBackbone;
   customPrompt: string;
+  scaleFactor?: number;
+  scaleLabel?: string | null;
+  arucoAnchor?: ArucoAnchor | null;
   unfoldProgress: number;
   showGroundTruth: boolean;
   showOcclusionRays: boolean;
@@ -84,7 +90,10 @@ interface LabWorkspaceProps {
   onChangeFovH: (fov: number) => void;
   onChangeThinkingLevel: (level: ThinkingLevel) => void;
   onChangeEngine: (engine: AnalyzeEngine) => void;
+  onChangeMogeBackbone: (backbone: MoGeBackbone) => void;
   onChangeCustomPrompt: (val: string) => void;
+  onCalibrateScale?: (nextFactor: number, label: string) => void;
+  onResetScale?: () => void;
   onChangeUnfoldProgress: (val: number) => void;
   onToggleGroundTruth: () => void;
   onToggleOcclusionRays: () => void;
@@ -111,7 +120,11 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   thinkingLevel,
   selectedModel,
   selectedEngine,
+  mogeBackbone,
   customPrompt,
+  scaleFactor = 1.0,
+  scaleLabel = null,
+  arucoAnchor = null,
   unfoldProgress,
   showGroundTruth,
   showOcclusionRays,
@@ -147,7 +160,10 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   onChangeFovH,
   onChangeThinkingLevel,
   onChangeEngine,
+  onChangeMogeBackbone,
   onChangeCustomPrompt,
+  onCalibrateScale,
+  onResetScale,
   onChangeUnfoldProgress,
   onToggleGroundTruth,
   onToggleOcclusionRays,
@@ -458,7 +474,23 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
             </select>
           </div>
 
-          <div className="flex min-w-[260px] flex-1 items-center gap-2">
+          <div className="flex items-center gap-2">
+            <label htmlFor="moge-backbone-select" className="text-xs font-medium text-[#4B5563]">
+              Precisión 3D
+            </label>
+            <select
+              id="moge-backbone-select"
+              value={mogeBackbone}
+              onChange={(e) => onChangeMogeBackbone(e.target.value as MoGeBackbone)}
+              className="font-mono-tech rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] px-2.5 py-1.5 text-xs font-medium text-[#111827] focus:border-[#1D4ED8] focus:outline-none"
+            >
+              <option value="vits">MoGe-2 ViT-S (Rápido)</option>
+              <option value="vitb">MoGe-2 ViT-B (Preciso)</option>
+              <option value="vitl">MoGe-2 ViT-L (Máxima)</option>
+            </select>
+          </div>
+
+          <div className="flex min-w-[240px] flex-1 items-center gap-2">
             <label
               htmlFor="custom-vocab-input"
               className="whitespace-nowrap text-xs font-medium text-[#4B5563]"
@@ -647,6 +679,9 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
             showPointCloud={showPointCloud}
             pointCloud={pointCloud}
             depthStats={depthStats}
+            scaleFactor={scaleFactor}
+            scaleLabel={scaleLabel}
+            arucoAnchor={arucoAnchor}
             unfoldProgress={unfoldProgress}
             cameraMode={cameraMode}
             onChangeCameraMode={onChangeCameraMode}
@@ -657,6 +692,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
             modeBadge={modeBadge}
             onSelectObject={onSelectObject}
             onHoverObject={onHoverObject}
+            onCalibrateScale={onCalibrateScale}
+            onResetScale={onResetScale}
           />
         </div>
       </div>
