@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Athene';
+  src: url('/fonts/Athene.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg-canvas: #F7F7F5;
   --bg-surface: #FFFFFF;
@@ -36,8 +44,11 @@
     scroll-padding-top: 4.5rem;
   }
 
-  .font-serif-editorial {
-    font-family: 'Instrument Serif', Georgia, Cambria, serif;
+  .font-serif-editorial,
+  .font-display-athene {
+    font-family: 'Athene', 'Instrument Serif', Georgia, Cambria, serif;
+    font-weight: 400;
+    letter-spacing: -0.015em;
   }
 
   .font-mono-tech {
@@ -232,79 +243,125 @@
       backface-visibility: hidden;
     }
 
-    /* Alternating Left/Right Problematic Scroll Choreography (Zero Horizontal Overflow) */
+    /* Continuous Scroll-Driven Editorial Choreography (Zero Horizontal Overflow) */
     .problem-scroll-section {
       overflow-x: clip;
-      view-timeline: --problem-rail block;
     }
 
-    @keyframes problem-rail-grow {
+    @keyframes rule-draw-x {
       from {
-        transform: scaleY(0);
+        transform: scaleX(0);
       }
       to {
-        transform: scaleY(1);
+        transform: scaleX(1);
+      }
+    }
+
+    @keyframes curtain-up-reveal {
+      from {
+        opacity: 0;
+        transform: translateY(34px);
+        clip-path: inset(0 0 14% 0);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+        clip-path: inset(0 0 0 0);
+      }
+    }
+
+    @keyframes bar-grow-x {
+      from {
+        transform: scaleX(0);
+      }
+      to {
+        transform: scaleX(1);
       }
     }
 
     @keyframes slide-in-left {
       from {
         opacity: 0;
-        transform: translateX(-56px) translateY(14px) scale(0.97);
+        transform: translateX(-48px) translateY(18px);
       }
       to {
         opacity: 1;
-        transform: translateX(0) translateY(0) scale(1);
+        transform: translateX(0) translateY(0);
       }
     }
 
     @keyframes slide-in-right {
       from {
         opacity: 0;
-        transform: translateX(56px) translateY(14px) scale(0.97);
+        transform: translateX(48px) translateY(18px);
       }
       to {
         opacity: 1;
-        transform: translateX(0) translateY(0) scale(1);
+        transform: translateX(0) translateY(0);
       }
     }
 
-    @keyframes axis-node-pop {
+    @keyframes editorial-exit-soft {
       from {
-        opacity: 0.2;
-        transform: scale(0.65);
+        opacity: 1;
+        transform: translateY(0);
       }
       to {
-        opacity: 1;
-        transform: scale(1);
+        opacity: 0.42;
+        transform: translateY(-10px);
       }
     }
 
-    .problem-rail-fill {
-      transform-origin: top center;
-      animation: problem-rail-grow linear both;
-      animation-timeline: --problem-rail;
-      animation-range: entry 15% cover 85%;
+    .scroll-rule-draw {
+      transform-origin: left center;
+      animation: rule-draw-x linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 32%;
+    }
+
+    .scroll-curtain-up {
+      animation: curtain-up-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 34%;
+      backface-visibility: hidden;
+    }
+
+    .scroll-bar-grow {
+      transform-origin: left center;
+      animation: bar-grow-x linear both;
+      animation-timeline: view();
+      animation-range: entry 6% cover 42%;
     }
 
     .scroll-enter-left {
-      animation: slide-in-left linear both;
+      animation:
+        slide-in-left linear backwards,
+        editorial-exit-soft linear forwards;
       animation-timeline: view();
-      animation-range: entry 4% cover 36%;
+      animation-range: entry 0% cover 38%, exit 55% exit 100%;
       backface-visibility: hidden;
     }
 
     .scroll-enter-right {
-      animation: slide-in-right linear both;
+      animation:
+        slide-in-right linear backwards,
+        editorial-exit-soft linear forwards;
       animation-timeline: view();
-      animation-range: entry 4% cover 36%;
+      animation-range: entry 0% cover 38%, exit 55% exit 100%;
       backface-visibility: hidden;
     }
 
-    .scroll-axis-node {
-      animation: axis-node-pop linear both;
-      animation-timeline: view();
-      animation-range: entry 8% cover 36%;
+    .scroll-stagger-1 {
+      animation-range: entry 0% cover 30%;
+    }
+    .scroll-stagger-2 {
+      animation-range: entry 6% cover 36%;
+    }
+    .scroll-stagger-3 {
+      animation-range: entry 12% cover 42%;
+    }
+    .scroll-stagger-4 {
+      animation-range: entry 18% cover 48%;
     }
 
     /* Staggered Hero Parallax via custom property --parallax-y */
@@ -462,15 +519,21 @@ input[type="range"].optical-slider::-moz-range-thumb {
   .reveal-on-scroll,
   .scrolly-card-inner,
   .scroll-card-lifecycle,
-  .problem-rail-fill,
+  .scroll-rule-draw,
+  .scroll-curtain-up,
+  .scroll-bar-grow,
   .scroll-enter-left,
   .scroll-enter-right,
-  .scroll-axis-node,
+  .scroll-stagger-1,
+  .scroll-stagger-2,
+  .scroll-stagger-3,
+  .scroll-stagger-4,
   .parallax-layer,
   .scroll-affordance-fade-x {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+    clip-path: none !important;
     mask: none !important;
   }
 

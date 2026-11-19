@@ -45,16 +45,20 @@ La portada interactiva (`#problematica-scroll`) introduce la problemática media
 
 ---
 
-## 2. Tour Visual de la Aplicación
+## 2. Tour Visual Animado y Aplicación Viva
+
+<p align="center">
+  <img src="docs/assets/pipeline_3d_live.gif" alt="Demostración animada en tiempo real: barrido 2D Pinhole K + escena métrica 3D en órbita" width="100%"/>
+</p>
 
 <table>
   <tr>
     <td width="50%" align="center">
-      <strong>1 · Narrativa Scroll Izquierda ↔ Derecha (Problemática Principal)</strong><br/>
-      <img src="docs/assets/app_problem_scroll_preview.png" alt="Sección de problemática con desplazamiento alternado izquierda/derecha" width="100%"/>
+      <strong>1 · Editorial Athene + Partículas Reactivas al Scroll</strong><br/>
+      <img src="docs/assets/app_problem_scroll_preview.png" alt="Landing editorial con tipografía Athene, partículas 3D al scroll y láminas arquitectónicas" width="100%"/>
     </td>
     <td width="50%" align="center">
-      <strong>2 · Laboratorio 3D Vivo (Pinhole + Three.js + Compuerta Edge → 3D)</strong><br/>
+      <strong>2 · Laboratorio 3D Vivo (Pinhole + Three.js + MoGe-2 Nube 3D)</strong><br/>
       <img src="docs/assets/app_lab_preview.png" alt="Laboratorio 3D interactivo con proyección pinhole, Three.js y trazado de oclusión" width="100%"/>
     </td>
   </tr>
@@ -98,7 +102,11 @@ Ejecutando [`backend/scripts/run_photo_model_tests.py`](backend/scripts/run_phot
 
 ---
 
-## 5. Arquitectura y Formulación
+## 5. Arquitectura Animada y Formulación Matemática
+
+<p align="center">
+  <img src="docs/assets/cascade_gate_animated.svg" alt="Diagrama animado de arquitectura: Foto RGB + EXIF -> MoGe-2 GPU -> Motor Quiral -> Compuerta C8286" width="100%"/>
+</p>
 
 ```mermaid
 flowchart LR
