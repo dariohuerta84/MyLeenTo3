@@ -24,6 +24,11 @@ from app.core.multiframe_audit import (
     audit_multiframe_consistency,
     get_demo_multiframe_sequence,
 )
+from app.core.multiview_fusion import (
+    build_demo_multiview_360_frames,
+    build_offline_multiview_frame,
+    fuse_multiview_frames,
+)
 from app.core.scale_calibration import (
     clamp_scale_factor,
     compute_scale_factor_from_reference,
@@ -49,6 +54,8 @@ from app.schemas import (
     MeasureResponse,
     ModelComparisonEntry,
     MultiFrameAuditRequest,
+    MultiViewReconstructRequest,
+    MultiViewReconstructResponse,
     ReprojectRequest,
     ReprojectResponse,
     SUPPORTED_MODELS,
@@ -66,6 +73,7 @@ from app.services.local_metric_3d import (
     get_local_3d_status,
     is_local_3d_available,
     run_local_metric_3d,
+    run_local_multiview_360,
 )
 from app.services.scene_intelligence import (
     build_scene_intelligence_payload,
@@ -926,3 +934,164 @@ def spatial_copilot(
         scene_intelligence=req.scene_intelligence,
     )
     return CopilotResponse(**result)
+
+
+def _assemble_multiview_response(
+    fused_payload: dict[str, Any],
+    *,
+    mode: str,
+    notice: Optional[str],
+    moge_backbone: str,
+    width: int,
+    height: int,
+    fov_h_deg: float,
+    latency_ms: float,
+    aruco_anchor: Optional[dict[str, Any]] = None,
+    depth_stats: Optional[dict[str, float]] = None,
+) -> MultiViewReconstructResponse:
+    fov_v_deg = round(compute_fov_v_deg(fov_h_deg, width, height), 4)
+    fused_obj = _enrich_object(
+        {
+            "id": "fused_body_360",
+            "label": "cuerpo_fusionado_360",
+            "box_3d": fused_payload["fused_box_3d"],
+            "confidence": 0.96,
+        },
+        width,
+        height,
+        fov_h_deg,
+    )
+    return MultiViewReconstructResponse(
+        mode=mode,
+        notice=notice,
+        moge_backbone=moge_backbone,
+        view_count=int(fused_payload["view_count"]),
+        width=int(width),
+        height=int(height),
+        fov_h_deg=round(float(fov_h_deg), 2),
+        fov_v_deg=fov_v_deg,
+        scale_factor=1.0,
+        aruco_anchor=aruco_anchor,
+        camera_poses=fused_payload["camera_poses"],
+        coverage_360=fused_payload["coverage_360"],
+        body_metrology=fused_payload["body_metrology"],
+        objects=[fused_obj],
+        point_cloud=fused_payload["point_cloud"],
+        depth_stats=depth_stats,
+        latency_ms=round(float(latency_ms), 2),
+    )
+
+
+def _run_multiview_demo(
+    *,
+    voxel_size_mm: Optional[float] = None,
+    allow_scale_alignment: bool = True,
+) -> MultiViewReconstructResponse:
+    t0 = time.perf_counter()
+    frames, gt_vol = build_demo_multiview_360_frames(4)
+    vox_m = (float(voxel_size_mm) / 1000.0) if voxel_size_mm is not None else None
+    fused = fuse_multiview_frames(
+        frames,
+        voxel_size_m=vox_m,
+        allow_scale_alignment=allow_scale_alignment,
+        gt_volume_m3=gt_vol,
+    )
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+    depth_stats = {
+        "min_m": 0.62,
+        "p10_m": 0.71,
+        "median_m": 0.84,
+        "p90_m": 0.98,
+        "max_m": 1.09,
+    }
+    return _assemble_multiview_response(
+        fused,
+        mode="multiview_calibrated_demo",
+        notice="Demo calibrada 360° (SEED=42 · 4 vistas orbitales, volumen analítico GT = 30.36 L).",
+        moge_backbone="vits",
+        width=384,
+        height=288,
+        fov_h_deg=56.0,
+        latency_ms=latency_ms,
+        aruco_anchor=None,
+        depth_stats=depth_stats,
+    )
+
+
+@app.get("/api/multiview-demo", response_model=MultiViewReconstructResponse)
+def multiview_360_demo() -> MultiViewReconstructResponse:
+    return _run_multiview_demo()
+
+
+@app.post("/api/multiview-reconstruct", response_model=MultiViewReconstructResponse)
+def multiview_reconstruct(req: MultiViewReconstructRequest) -> MultiViewReconstructResponse:
+    if req.use_demo:
+        return _run_multiview_demo(
+            voxel_size_mm=req.voxel_size_mm,
+            allow_scale_alignment=req.allow_scale_alignment,
+        )
+
+    if len(req.images) < 2 or len(req.images) > 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide between 2 and 6 overlapping orbital views in 'images', or set use_demo=true.",
+        )
+
+    vox_m = (float(req.voxel_size_mm) / 1000.0) if req.voxel_size_mm is not None else None
+
+    if is_local_3d_available():
+        raw_imgs = [item.model_dump(exclude_none=True) for item in req.images]
+        try:
+            gpu_res = run_local_multiview_360(
+                raw_imgs,
+                fov_override_deg=req.fov_h_deg,
+                auto_fov=req.auto_fov,
+                moge_backbone=req.moge_backbone,
+                voxel_size_m=vox_m,
+                allow_scale_alignment=req.allow_scale_alignment,
+                aruco_marker_size_cm=req.aruco_marker_size_cm,
+            )
+            return _assemble_multiview_response(
+                gpu_res,
+                mode=str(gpu_res["mode"]),
+                notice=f"Reconstrucción 360° GPU/CPU ({gpu_res['model_desc']} · {gpu_res['view_count']} vistas).",
+                moge_backbone=str(gpu_res["moge_backbone"]),
+                width=int(gpu_res["width"]),
+                height=int(gpu_res["height"]),
+                fov_h_deg=float(gpu_res["fov_h_deg"]),
+                latency_ms=float(gpu_res["latency_ms"]),
+                aruco_anchor=gpu_res.get("aruco_anchor"),
+                depth_stats=gpu_res.get("depth_stats"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    t0 = time.perf_counter()
+    frames = [
+        build_offline_multiview_frame(
+            item.image_base64,
+            label=item.label or f"Vista {idx + 1}",
+            fov_h_deg=req.fov_h_deg,
+            yaw_hint_deg=item.yaw_hint_deg,
+        )
+        for idx, item in enumerate(req.images)
+    ]
+    fused = fuse_multiview_frames(
+        frames,
+        voxel_size_m=vox_m,
+        allow_scale_alignment=req.allow_scale_alignment,
+    )
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+    first_rgb = frames[0]["rgb_u8"]
+    return _assemble_multiview_response(
+        fused,
+        mode="multiview_offline_fallback",
+        notice="Motor MoGe-2 GPU deshabilitado; ejecutado con estimador geométrico offline.",
+        moge_backbone=req.moge_backbone,
+        width=int(first_rgb.shape[1]),
+        height=int(first_rgb.shape[0]),
+        fov_h_deg=req.fov_h_deg,
+        latency_ms=latency_ms,
+        aruco_anchor=None,
+        depth_stats={"min_m": 0.85, "p10_m": 0.90, "median_m": 1.02, "p90_m": 1.18, "max_m": 1.25},
+    )

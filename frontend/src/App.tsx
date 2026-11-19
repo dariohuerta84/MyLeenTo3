@@ -34,6 +34,7 @@ import { HeaderNav } from './components/HeaderNav';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { LandingShowcase } from './components/LandingShowcase';
 import { LabWorkspace } from './components/LabWorkspace';
+import { MultiView360Workspace } from './components/MultiView360Workspace';
 import { MetricsBenchmarkPanel } from './components/MetricsBenchmarkPanel';
 import { MultiFrameAuditPanel } from './components/MultiFrameAuditPanel';
 
@@ -43,7 +44,7 @@ const DEFAULT_THINKING_BY_MODEL: Record<GeminiModelId, ThinkingLevel> = {
   'gemini-3.5-flash-lite': 'low',
 };
 
-const VALID_VIEWS: AppSection[] = ['landing', 'lab', 'multiframe', 'metrics'];
+const VALID_VIEWS: AppSection[] = ['landing', 'lab', 'multiview', 'multiframe', 'metrics'];
 
 function getInitialQueryParams(): { view: AppSection; scene?: string } {
   if (typeof window === 'undefined') return { view: 'landing' };
@@ -735,6 +736,15 @@ export function App() {
             onHoverObject={setHoveredObjectId}
             onClearSelection={handleClearSelection}
             onExecuteSceneActions={handleExecuteSceneActions}
+          />
+        )}
+
+        {activeSection === 'multiview' && (
+          <MultiView360Workspace
+            mogeBackbone={mogeBackbone}
+            onChangeMogeBackbone={setMogeBackbone}
+            local3dAvailable={local3dAvailable}
+            local3dDevice={local3dDevice}
           />
         )}
 

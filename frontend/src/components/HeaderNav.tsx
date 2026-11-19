@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Box, Compass, Film, KeyRound } from 'lucide-react';
+import { BarChart3, Box, Compass, Film, KeyRound, Orbit } from 'lucide-react';
 import type { AppSection, GeminiModelId } from '../types/spatial';
 
 interface HeaderNavProps {
@@ -19,6 +19,7 @@ const NAV_ITEMS: Array<{
 }> = [
   { id: 'landing', label: 'Visión Pinhole', icon: Compass },
   { id: 'lab', label: 'Laboratorio 3D', icon: Box },
+  { id: 'multiview', label: 'Reconstrucción 360°', icon: Orbit },
   { id: 'multiframe', label: 'Auditoría Multi-Frame', icon: Film },
   { id: 'metrics', label: 'Métricas', icon: BarChart3 },
 ];

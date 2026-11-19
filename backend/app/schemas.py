@@ -317,3 +317,84 @@ class CopilotResponse(BaseModel):
     scene_actions: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: float
     usage: dict[str, Any] = Field(default_factory=dict)
+
+
+class MultiViewInputImage(BaseModel):
+    image_base64: str = Field(..., min_length=16)
+    mime_type: str = "image/png"
+    label: Optional[str] = None
+    yaw_hint_deg: Optional[float] = Field(default=None, ge=-360.0, le=360.0)
+
+
+class MultiViewReconstructRequest(BaseModel):
+    images: list[MultiViewInputImage] = Field(default_factory=list)
+    use_demo: bool = False
+    moge_backbone: MoGeBackbone = "vits"
+    fov_h_deg: float = Field(default=60.0, ge=20.0, le=140.0)
+    auto_fov: bool = True
+    allow_scale_alignment: bool = True
+    voxel_size_mm: Optional[float] = Field(default=None, ge=2.0, le=50.0)
+    aruco_marker_size_cm: Optional[float] = Field(default=None, ge=1.0, le=100.0)
+
+
+class MultiViewCameraPose(BaseModel):
+    view_index: int
+    label: str
+    center_three: list[float]
+    quaternion_three: list[float]
+    forward_three: list[float]
+    up_three: list[float]
+    azimuth_deg: float
+    fov_h_deg: float
+    registration_method: str
+    inliers: int
+    alignment_rmse_m: float
+    overlap_ratio: float
+    estimated_scale: float
+    color: str
+    thumbnail_base64: Optional[str] = None
+
+
+class MultiViewCoverage360(BaseModel):
+    sector_scores: list[float]
+    angular_coverage_pct: float
+    largest_blind_gap_deg: float
+    recommended_next_azimuth_deg: float
+    is_watertight_360: bool
+    next_best_view_advice_es: str
+
+
+class MultiViewBodyMetrology(BaseModel):
+    convex_hull_volume_m3: float
+    convex_hull_surface_area_m2: float
+    voxel_solid_volume_m3: float
+    voxel_shell_volume_m3: float
+    voxel_resolution_mm: float
+    occupied_voxels: int
+    bounding_dimensions_m: list[float]
+    fused_center_gemini: list[float]
+    fused_box_3d: list[float]
+    mean_icp_rmse_mm: float
+    single_view_obb_volume_m3: Optional[float] = None
+    gt_volume_m3: Optional[float] = None
+    gt_volume_error_pct: Optional[float] = None
+
+
+class MultiViewReconstructResponse(BaseModel):
+    mode: str
+    notice: Optional[str] = None
+    moge_backbone: str = "vits"
+    view_count: int
+    width: int
+    height: int
+    fov_h_deg: float
+    fov_v_deg: float
+    scale_factor: float = 1.0
+    aruco_anchor: Optional[dict[str, Any]] = None
+    camera_poses: list[MultiViewCameraPose]
+    coverage_360: MultiViewCoverage360
+    body_metrology: MultiViewBodyMetrology
+    objects: list[EnrichedObject] = Field(default_factory=list)
+    point_cloud: dict[str, Any]
+    depth_stats: Optional[dict[str, float]] = None
+    latency_ms: float

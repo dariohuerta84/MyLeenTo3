@@ -12,6 +12,8 @@ import type {
   MultiFrameAuditResult,
   MultiFrameDemoResponse,
   MultiFrameItem,
+  MultiViewInputImage,
+  MultiViewReconstructResponse,
   PairwiseGeometry,
   RealPhotoMetrics,
   ReprojectResponse,
@@ -249,4 +251,28 @@ export async function sendCopilotMessage(
     },
     apiKey
   );
+}
+
+export interface MultiViewReconstructPayload {
+  images?: MultiViewInputImage[];
+  use_demo?: boolean;
+  moge_backbone?: MoGeBackbone;
+  fov_h_deg?: number;
+  auto_fov?: boolean;
+  allow_scale_alignment?: boolean;
+  voxel_size_mm?: number;
+  aruco_marker_size_cm?: number;
+}
+
+export async function fetchMultiViewDemo(): Promise<MultiViewReconstructResponse> {
+  return requestJson<MultiViewReconstructResponse>('/multiview-demo');
+}
+
+export async function reconstructMultiView360(
+  payload: MultiViewReconstructPayload
+): Promise<MultiViewReconstructResponse> {
+  return requestJson<MultiViewReconstructResponse>('/multiview-reconstruct', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

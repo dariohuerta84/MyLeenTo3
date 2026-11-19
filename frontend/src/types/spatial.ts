@@ -7,7 +7,7 @@ export type ThinkingLevel = 'low' | 'medium' | 'high';
 
 export type CameraViewMode = 'camera_aligned' | 'orbit' | 'bev' | 'isometric';
 
-export type AppSection = 'landing' | 'lab' | 'multiframe' | 'metrics';
+export type AppSection = 'landing' | 'lab' | 'multiview' | 'multiframe' | 'metrics';
 
 export type AnalyzeEngine =
   | 'auto'
@@ -585,4 +585,74 @@ export interface ChatMessage {
   tool_trace?: CopilotToolTrace[];
   scene_actions?: SceneAction[];
   timestamp: string;
+}
+
+export interface MultiViewInputImage {
+  image_base64: string;
+  mime_type?: string;
+  label?: string;
+  yaw_hint_deg?: number | null;
+}
+
+export interface MultiViewCameraPose {
+  view_index: number;
+  label: string;
+  center_three: [number, number, number];
+  quaternion_three: [number, number, number, number];
+  forward_three: [number, number, number];
+  up_three: [number, number, number];
+  azimuth_deg: number;
+  fov_h_deg: number;
+  registration_method: string;
+  inliers: number;
+  alignment_rmse_m: number;
+  overlap_ratio: number;
+  estimated_scale: number;
+  color: string;
+  thumbnail_base64?: string | null;
+}
+
+export interface MultiViewCoverage360 {
+  sector_scores: number[];
+  angular_coverage_pct: number;
+  largest_blind_gap_deg: number;
+  recommended_next_azimuth_deg: number;
+  is_watertight_360: boolean;
+  next_best_view_advice_es: string;
+}
+
+export interface MultiViewBodyMetrology {
+  convex_hull_volume_m3: number;
+  convex_hull_surface_area_m2: number;
+  voxel_solid_volume_m3: number;
+  voxel_shell_volume_m3: number;
+  voxel_resolution_mm: number;
+  occupied_voxels: number;
+  bounding_dimensions_m: [number, number, number];
+  fused_center_gemini: [number, number, number];
+  fused_box_3d: [number, number, number, number, number, number, number, number, number];
+  mean_icp_rmse_mm: number;
+  single_view_obb_volume_m3?: number | null;
+  gt_volume_m3?: number | null;
+  gt_volume_error_pct?: number | null;
+}
+
+export interface MultiViewReconstructResponse {
+  mode: string;
+  notice?: string | null;
+  moge_backbone: MoGeBackbone | string;
+  view_count: number;
+  width: number;
+  height: number;
+  fov_h_deg: number;
+  fov_v_deg: number;
+  scale_factor: number;
+  aruco_anchor?: ArucoAnchor | null;
+  camera_poses: MultiViewCameraPose[];
+  coverage_360: MultiViewCoverage360;
+  body_metrology: MultiViewBodyMetrology;
+  objects: SpatialObject[];
+  point_cloud: PointCloudData;
+  depth_stats?: DepthStats | null;
+  latency_ms: number;
 }

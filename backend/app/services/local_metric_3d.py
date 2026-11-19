@@ -27,6 +27,7 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image, ImageOps
 
+from ..core.multiview_fusion import _encode_png_thumbnail, fuse_multiview_frames
 from ..core.real_photo_metrics import (
     compute_object_point_cloud_metrology,
     compute_real_photo_3d_metrics,
@@ -1668,5 +1669,131 @@ def run_local_metric_3d(
         "depth_stats": depth_stats,
         "point_cloud": point_cloud,
         "real_photo_metrics": real_metrics,
+        "latency_ms": latency_ms,
+    }
+
+
+def _compute_multiview_foreground_mask(depth_m: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+    """Estimate foreground body mask for multi-view scans using central depth band."""
+    valid = valid_mask & np.isfinite(depth_m) & (depth_m > 0.04) & (depth_m < 35.0)
+    if not np.any(valid):
+        return valid
+    h, w = depth_m.shape[:2]
+    y0, y1 = int(h * 0.2), max(int(h * 0.8), int(h * 0.2) + 1)
+    x0, x1 = int(w * 0.2), max(int(w * 0.8), int(w * 0.2) + 1)
+    center_d = depth_m[y0:y1, x0:x1][valid[y0:y1, x0:x1]]
+    if center_d.size < 32:
+        center_d = depth_m[valid]
+    d_med = float(np.median(center_d))
+    d_lo = max(0.04, float(np.percentile(depth_m[valid], 2.0)))
+    d_hi = max(d_lo + 0.08, min(float(np.percentile(depth_m[valid], 78.0)), d_med * 1.45))
+    fg = valid & (depth_m >= d_lo) & (depth_m <= d_hi)
+    return fg if int(np.sum(fg)) >= 64 else valid
+
+
+def run_local_multiview_360(
+    images: list[dict[str, Any]],
+    *,
+    fov_override_deg: Optional[float] = None,
+    auto_fov: bool = True,
+    moge_backbone: str = "vits",
+    voxel_size_m: Optional[float] = None,
+    allow_scale_alignment: bool = True,
+    aruco_marker_size_cm: Optional[float] = None,
+) -> dict[str, Any]:
+    """Sequentially lift 2-6 orbital RGB images via MoGe-2 and fuse into a 360-degree 3D model."""
+    t0 = time.perf_counter()
+    bb = _resolve_moge_backbone(moge_backbone)
+
+    frames: list[dict[str, Any]] = []
+    first_aruco: Optional[dict[str, Any]] = None
+    first_w, first_h, first_fov = 640, 480, float(fov_override_deg or 60.0)
+    first_depth_stats: Optional[dict[str, float]] = None
+    last_device = "cpu"
+    last_device_desc = ""
+
+    for idx, item in enumerate(images):
+        img_b64 = str(item.get("image_base64") or "")
+        if not img_b64:
+            continue
+        rgb_pil, w, h, exif_fov = extract_exif_image_info(img_b64)
+        hint = exif_fov if auto_fov else fov_override_deg
+        moge_out = _run_moge2_inference(rgb_pil, fov_hint_deg=hint, moge_backbone=bb)
+        last_device = str(moge_out["device"])
+        last_device_desc = str(moge_out["device_desc"])
+
+        moge_fov = float(moge_out["moge_fov_h_deg"])
+        if not auto_fov and fov_override_deg is not None:
+            eff_fov = float(fov_override_deg)
+        elif exif_fov is not None:
+            eff_fov = float(exif_fov)
+        else:
+            eff_fov = moge_fov
+
+        rgb_u8 = moge_out["rgb_u8"]
+        pts_cv = moge_out["points_cv"]
+        dep_m = moge_out["depth_m"]
+        valid_mask = moge_out["valid_mask"]
+        normals_cv = moge_out.get("normals_cv")
+
+        aruco = _safe_detect_aruco_anchor(rgb_u8, pts_cv, valid_mask, aruco_marker_size_cm)
+        if first_aruco is None and aruco and aruco.get("detected"):
+            first_aruco = aruco
+
+        if idx == 0:
+            first_w, first_h, first_fov = int(w), int(h), round(eff_fov, 2)
+            first_depth_stats = compute_depth_stats(dep_m, valid_mask)
+
+        fg_mask = _compute_multiview_foreground_mask(dep_m, valid_mask)
+        yaw_hint = item.get("yaw_hint_deg")
+        frames.append(
+            {
+                "label": str(item.get("label") or f"Vista {idx + 1}"),
+                "rgb_u8": rgb_u8,
+                "points_cv": pts_cv,
+                "normals_cv": normals_cv,
+                "valid_mask": valid_mask,
+                "foreground_mask": fg_mask,
+                "fov_h_deg": eff_fov,
+                "yaw_hint_deg": float(yaw_hint) if yaw_hint is not None else None,
+                "aruco_anchor": aruco,
+                "thumbnail_base64": _encode_png_thumbnail(rgb_u8),
+            }
+        )
+
+    try:
+        import torch
+
+        if last_device.startswith("cuda") and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    if len(frames) < 2:
+        raise ValueError("At least 2 valid RGB views are required for 360-degree multi-view reconstruction.")
+
+    fused = fuse_multiview_frames(
+        frames,
+        voxel_size_m=voxel_size_m,
+        allow_scale_alignment=allow_scale_alignment,
+    )
+    latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+    mode_name = "multiview_moge2_gpu" if last_device.startswith("cuda") else "multiview_moge2_cpu"
+
+    return {
+        "mode": mode_name,
+        "model_desc": last_device_desc,
+        "moge_backbone": bb,
+        "view_count": fused["view_count"],
+        "aruco_anchor": first_aruco,
+        "camera_poses": fused["camera_poses"],
+        "coverage_360": fused["coverage_360"],
+        "body_metrology": fused["body_metrology"],
+        "point_cloud": fused["point_cloud"],
+        "fused_box_3d": fused["fused_box_3d"],
+        "width": first_w,
+        "height": first_h,
+        "fov_h_deg": first_fov,
+        "depth_stats": first_depth_stats,
         "latency_ms": latency_ms,
     }

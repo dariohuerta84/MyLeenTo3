@@ -23,6 +23,7 @@ import type {
   CameraViewMode,
   DepthStats,
   MeasurementState,
+  MultiViewCameraPose,
   OcclusionEntry,
   PerObjectMatch,
   PointCloudData,
@@ -44,6 +45,8 @@ interface Scene3DViewportProps {
   showOcclusionRays: boolean;
   showPointCloud?: boolean;
   pointCloud?: PointCloudData | null;
+  cameraPoses?: MultiViewCameraPose[];
+  hideSingleFocalPlane?: boolean;
   depthStats?: DepthStats | null;
   scaleFactor?: number;
   scaleLabel?: string | null;
@@ -1443,6 +1446,7 @@ const SurfaceCaliper3D: React.FC<{
           gapSize={Math.max(0.01, 0.015 * scaleRatio)}
         />
       )}
+      {/* 3D Direct Surface Caliper */}
       <CanvasSpriteLabel
         position={mid}
         lines={[
@@ -1453,6 +1457,92 @@ const SurfaceCaliper3D: React.FC<{
         borderColor="#BE123C"
         worldHeight={Math.max(0.11, 0.22 * scaleRatio)}
       />
+    </group>
+  );
+};
+
+const MultiViewCameraFrustums3D: React.FC<{
+  poses: MultiViewCameraPose[];
+  scaleFactor: number;
+  scaleRatio: number;
+  visible: boolean;
+}> = ({ poses, scaleFactor, scaleRatio, visible }) => {
+  if (!visible || poses.length === 0) return null;
+
+  const frustumDepth = Math.max(0.08, 0.14 * scaleRatio);
+  const sphereR = Math.max(0.014, 0.022 * scaleRatio);
+  const trajectory: [number, number, number][] = poses.map((p) => [
+    p.center_three[0] * scaleFactor,
+    p.center_three[1] * scaleFactor,
+    p.center_three[2] * scaleFactor,
+  ]);
+
+  return (
+    <group>
+      {trajectory.length >= 2 && (
+        <Line
+          points={trajectory}
+          color="#475569"
+          lineWidth={1.2}
+          dashed
+          dashSize={Math.max(0.03, 0.05 * scaleRatio)}
+          gapSize={Math.max(0.02, 0.03 * scaleRatio)}
+          transparent
+          opacity={0.55}
+        />
+      )}
+
+      {poses.map((pose) => {
+        const pos: [number, number, number] = [
+          pose.center_three[0] * scaleFactor,
+          pose.center_three[1] * scaleFactor,
+          pose.center_three[2] * scaleFactor,
+        ];
+        const halfW = frustumDepth * Math.tan((Math.max(25, Math.min(110, pose.fov_h_deg)) * Math.PI) / 360);
+        const halfH = halfW * 0.72;
+        const corners: [number, number, number][] = [
+          [-halfW, halfH, -frustumDepth],
+          [halfW, halfH, -frustumDepth],
+          [halfW, -halfH, -frustumDepth],
+          [-halfW, -halfH, -frustumDepth],
+        ];
+        const color = pose.color || '#1D4ED8';
+
+        return (
+          <group key={`cam-pose-${pose.view_index}`}>
+            <group position={pos} quaternion={pose.quaternion_three}>
+              <mesh>
+                <sphereGeometry args={[sphereR, 12, 12]} />
+                <meshStandardMaterial color={color} roughness={0.35} />
+              </mesh>
+              {corners.map((c, idx) => (
+                <Line
+                  key={`c-${idx}`}
+                  points={[[0, 0, 0], c]}
+                  color={color}
+                  lineWidth={1.3}
+                  transparent
+                  opacity={0.85}
+                />
+              ))}
+              <Line
+                points={[...corners, corners[0]]}
+                color={color}
+                lineWidth={1.6}
+                transparent
+                opacity={0.9}
+              />
+            </group>
+            <CanvasSpriteLabel
+              position={[pos[0], pos[1] + 0.095 * scaleRatio, pos[2]]}
+              lines={[`V${pose.view_index + 1} · ${Math.round(pose.azimuth_deg)}°`]}
+              accentColor={color}
+              borderColor={color}
+              worldHeight={Math.max(0.05, 0.11 * scaleRatio)}
+            />
+          </group>
+        );
+      })}
     </group>
   );
 };
@@ -1471,6 +1561,8 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   showOcclusionRays,
   showPointCloud = true,
   pointCloud,
+  cameraPoses,
+  hideSingleFocalPlane = false,
   depthStats,
   scaleFactor = 1.0,
   scaleLabel = null,
@@ -1555,8 +1647,9 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   }, []);
 
   const focusTarget = useMemo<[number, number, number] | null>(() => {
-    if (!selectedObjectId) return null;
-    const found = objects.find((o) => o.id === selectedObjectId);
+    const targetId = selectedObjectId ?? (hideSingleFocalPlane ? objects[0]?.id : null);
+    if (!targetId) return null;
+    const found = objects.find((o) => o.id === targetId);
     if (!found) return null;
     return (
       found.threejs_pose?.position ?? [
@@ -1565,7 +1658,7 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
         -found.box_3d[1],
       ]
     );
-  }, [objects, selectedObjectId]);
+  }, [objects, selectedObjectId, hideSingleFocalPlane]);
 
   const matchByGtId = useMemo(() => {
     const map = new Map<string, PerObjectMatch>();
@@ -1596,6 +1689,7 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
   const [caliperRawA, setCaliperRawA] = useState<[number, number, number] | null>(null);
   const [caliperRawB, setCaliperRawB] = useState<[number, number, number] | null>(null);
   const [referenceCmInput, setReferenceCmInput] = useState<string>('8.56');
+  const [showCameraFrustums, setShowCameraFrustums] = useState<boolean>(true);
 
   const safeScaleFactor = scaleFactor > 0.05 && Number.isFinite(scaleFactor) ? scaleFactor : 1.0;
 
@@ -1851,6 +1945,22 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
               <Crosshair className="h-3 w-3" />
               <span>Calibrador 3D</span>
             </button>
+
+            {cameraPoses && cameraPoses.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setShowCameraFrustums((v) => !v)}
+                title="Mostrar/ocultar cámaras registradas alrededor del cuerpo 360°"
+                className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                  showCameraFrustums
+                    ? 'border-[#1D4ED8] bg-[#1D4ED8]/10 text-[#1D4ED8]'
+                    : 'border-[#E2E5EA] bg-[#FFFFFF] text-[#4B5563] hover:text-[#111827]'
+                }`}
+              >
+                <Camera className="h-3 w-3" />
+                <span>Cámaras ({cameraPoses.length})</span>
+              </button>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -2145,15 +2255,26 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
 
           <MetricOpticalBenchFloor cameraMode={cameraMode} sceneScale={sceneScale} />
 
-          <CameraFrustumAndFocalPlane
-            imageBase64={imageBase64}
-            imageMime={imageMime}
-            fovHDeg={fovHDeg}
-            fovVDeg={fovVDeg}
-            focalPlaneDepth={focalPlaneDepth}
-            unfoldProgress={unfoldProgress}
-            cameraMode={cameraMode}
-          />
+          {!hideSingleFocalPlane && (
+            <CameraFrustumAndFocalPlane
+              imageBase64={imageBase64}
+              imageMime={imageMime}
+              fovHDeg={fovHDeg}
+              fovVDeg={fovVDeg}
+              focalPlaneDepth={focalPlaneDepth}
+              unfoldProgress={unfoldProgress}
+              cameraMode={cameraMode}
+            />
+          )}
+
+          {cameraPoses && cameraPoses.length > 0 && (
+            <MultiViewCameraFrustums3D
+              poses={cameraPoses}
+              scaleFactor={safeScaleFactor}
+              scaleRatio={scaleRatio}
+              visible={showCameraFrustums}
+            />
+          )}
 
           <group scale={[safeScaleFactor, safeScaleFactor, safeScaleFactor]}>
             <MetricSurfaceMesh
