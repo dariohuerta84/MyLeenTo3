@@ -14,12 +14,26 @@
   --accent-crimson: #BE123C;
 }
 
+/* Registered custom properties for smooth scroll-driven horizontal edge fades */
+@property --fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @layer base {
   html {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background-color: var(--bg-canvas);
     color: var(--ink-primary);
     scroll-behavior: smooth;
+    scroll-padding-top: 4.5rem;
   }
 
   .font-serif-editorial {
@@ -52,44 +66,225 @@
   transform: scaleX(0);
 }
 
-@supports (animation-timeline: scroll()) {
-  @keyframes scroll-progress-grow {
-    from {
-      transform: scaleX(0);
+/* Shrinking & surface-stabilizing sticky header on scroll */
+.optical-header-bar {
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: scroll()) {
+    @keyframes scroll-progress-grow {
+      from {
+        transform: scaleX(0);
+      }
+      to {
+        transform: scaleX(1);
+      }
     }
-    to {
-      transform: scaleX(1);
+
+    .scroll-progress-bar {
+      animation: scroll-progress-grow linear both;
+      animation-timeline: scroll(root block);
     }
   }
 
-  .scroll-progress-bar {
-    animation: scroll-progress-grow linear both;
-    animation-timeline: scroll(root block);
+  @supports ((animation-timeline: scroll()) and (animation-range: 0% 100%)) {
+    @keyframes header-compact-on-scroll {
+      from {
+        background-color: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 0 0 rgba(17, 24, 39, 0);
+      }
+      to {
+        background-color: rgba(255, 255, 255, 0.99);
+        box-shadow: 0 4px 18px rgba(17, 24, 39, 0.06);
+      }
+    }
+
+    @keyframes header-inner-compact {
+      from {
+        height: 3.75rem;
+      }
+      to {
+        height: 3.15rem;
+      }
+    }
+
+    .optical-header-bar {
+      animation: header-compact-on-scroll linear both;
+      animation-timeline: scroll(block root);
+      animation-range: 0px 120px;
+    }
+
+    .optical-header-bar .optical-header-inner {
+      animation: header-inner-compact linear both;
+      animation-timeline: scroll(block root);
+      animation-range: 0px 120px;
+    }
+  }
+
+  /* Native CSS Scroll-Driven View Entry Reveals (Compositor-Only) */
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    @keyframes editorial-reveal {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .reveal-on-scroll {
+      animation: editorial-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 26%;
+    }
+
+    /* Named view-timeline + timeline-scope Scrollytelling Chapters */
+    .scrolly-narrative-scope {
+      timeline-scope: --tl-ch1, --tl-ch2, --tl-ch3, --tl-ch4;
+    }
+
+    .scrolly-chapter-1 {
+      view-timeline: --tl-ch1 block;
+    }
+    .scrolly-chapter-2 {
+      view-timeline: --tl-ch2 block;
+    }
+    .scrolly-chapter-3 {
+      view-timeline: --tl-ch3 block;
+    }
+    .scrolly-chapter-4 {
+      view-timeline: --tl-ch4 block;
+    }
+
+    @keyframes scrolly-chapter-enter {
+      from {
+        opacity: 0.42;
+        transform: translateY(18px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes scrolly-chapter-exit {
+      from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+      to {
+        opacity: 0.55;
+        transform: translateY(-10px) scale(0.99);
+      }
+    }
+
+    .scrolly-chapter-1 .scrolly-card-inner {
+      animation: scrolly-chapter-enter linear backwards, scrolly-chapter-exit linear forwards;
+      animation-timeline: --tl-ch1;
+      animation-range: entry 0% entry 100%, exit 20% exit 100%;
+    }
+    .scrolly-chapter-2 .scrolly-card-inner {
+      animation: scrolly-chapter-enter linear backwards, scrolly-chapter-exit linear forwards;
+      animation-timeline: --tl-ch2;
+      animation-range: entry 0% entry 100%, exit 20% exit 100%;
+    }
+    .scrolly-chapter-3 .scrolly-card-inner {
+      animation: scrolly-chapter-enter linear backwards, scrolly-chapter-exit linear forwards;
+      animation-timeline: --tl-ch3;
+      animation-range: entry 0% entry 100%, exit 20% exit 100%;
+    }
+    .scrolly-chapter-4 .scrolly-card-inner {
+      animation: scrolly-chapter-enter linear backwards, scrolly-chapter-exit linear forwards;
+      animation-timeline: --tl-ch4;
+      animation-range: entry 0% entry 100%, exit 20% exit 100%;
+    }
+
+    /* Entry & Exit Range Selectors on Benchmark & Pillar Cards */
+    @keyframes card-enter-in {
+      from {
+        opacity: 0.15;
+        transform: translateY(24px) scale(0.96);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes card-exit-out {
+      from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+      to {
+        opacity: 0.45;
+        transform: translateY(-10px) scale(0.98);
+      }
+    }
+
+    .scroll-card-lifecycle {
+      animation: card-enter-in linear backwards, card-exit-out linear forwards;
+      animation-timeline: view();
+      animation-range: entry 0% cover 32%, exit 35% exit 100%;
+      backface-visibility: hidden;
+    }
+
+    /* Staggered Hero Parallax via custom property --parallax-y */
+    .parallax-hero-scope {
+      view-timeline: --hero-parallax block;
+    }
+
+    @keyframes hero-parallax-shift {
+      from {
+        transform: translateY(0px);
+      }
+      to {
+        transform: translateY(var(--parallax-y, -24px));
+      }
+    }
+
+    .parallax-layer {
+      animation: hero-parallax-shift linear both;
+      animation-timeline: --hero-parallax;
+      animation-range: entry 0% exit 100%;
+    }
+  }
+
+  /* Scroll-driven horizontal fade mask using registered @property */
+  @supports (animation-timeline: scroll()) and (mask: linear-gradient(black, black) no-clip subtract) {
+    @keyframes reveal-fade-start {
+      to {
+        --fade-start: var(--fade-size);
+      }
+    }
+
+    @keyframes hide-fade-end {
+      from {
+        --fade-end: var(--fade-size);
+      }
+    }
+
+    .scroll-affordance-fade-x {
+      overflow-x: auto;
+      --fade-size: 2.5rem;
+      mask:
+        linear-gradient(black, black) no-clip subtract,
+        linear-gradient(to right, black, transparent) 0 0 / var(--fade-start) 100% no-repeat no-clip,
+        linear-gradient(to right, transparent, black) 100% 0 / var(--fade-end) 100% no-repeat no-clip;
+      animation: reveal-fade-start linear both, hide-fade-end linear both;
+      animation-timeline: scroll(self inline);
+      animation-range: 0 var(--fade-size), calc(100% - var(--fade-size)) 100%;
+    }
   }
 }
 
-/* Native CSS Scroll-Driven View Entry Reveals (Compositor-Only) */
-.reveal-on-scroll {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-@supports ((animation-timeline: view()) and (animation-range: entry)) {
-  @keyframes editorial-reveal {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .reveal-on-scroll {
-    animation: editorial-reveal linear both;
-    animation-timeline: view();
-    animation-range: entry 0% cover 26%;
+/* Fallback horizontal scroll affordance when mask subtract is unavailable */
+@supports not (mask: linear-gradient(black, black) no-clip subtract) {
+  .scroll-affordance-fade-x {
+    overflow-x: auto;
   }
 }
 
@@ -102,6 +297,17 @@
 
 .workspace-transition-region {
   view-transition-name: workspace-main;
+}
+
+.scene-transition-target {
+  view-transition-name: active-scene-card;
+}
+
+::view-transition-old(active-scene-card),
+::view-transition-new(active-scene-card) {
+  height: 100%;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Off-screen WebGL pausing container */
@@ -172,14 +378,23 @@ input[type="range"].optical-slider::-moz-range-thumb {
   }
 
   .scroll-progress-bar,
-  .reveal-on-scroll {
+  .optical-header-bar,
+  .optical-header-bar .optical-header-inner,
+  .reveal-on-scroll,
+  .scrolly-card-inner,
+  .scroll-card-lifecycle,
+  .parallax-layer,
+  .scroll-affordance-fade-x {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+    mask: none !important;
   }
 
+  ::view-transition-group(*),
   ::view-transition-old(*),
   ::view-transition-new(*) {
+    animation: none !important;
     animation-duration: 0.01ms !important;
   }
 }

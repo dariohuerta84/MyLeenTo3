@@ -41,8 +41,8 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const liveReady = hasApiKey || backendEnvConfigured;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-[#E2E5EA] bg-[#FFFFFF]/95 backdrop-blur-sm">
-      <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-6">
+    <header className="optical-header-bar sticky top-0 z-40 border-b border-[#E2E5EA] bg-[#FFFFFF]/95 backdrop-blur-sm">
+      <div className="optical-header-inner mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-6">
         {/* Wordmark */}
         <button
           type="button"
