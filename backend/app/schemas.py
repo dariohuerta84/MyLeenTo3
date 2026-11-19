@@ -130,8 +130,9 @@ class AnalyzeRequest(BaseModel):
     max_objects: int = Field(default=10, ge=1, le=30)
     custom_prompt: Optional[str] = None
     force_demo: bool = False
-    engine: Literal["auto", "moge2_local", "gemini_live", "salience_fallback"] = "auto"
+    engine: Literal["auto", "hybrid_vlm_3d", "moge2_local", "gemini_live", "salience_fallback"] = "auto"
     auto_fov: bool = True
+    enable_diagnosis: bool = True
 
 
 class AnalyzeResponse(BaseModel):
@@ -160,6 +161,7 @@ class AnalyzeResponse(BaseModel):
     depth_stats: Optional[dict[str, float]] = None
     point_cloud: Optional[dict[str, Any]] = None
     real_photo_metrics: Optional[dict[str, Any]] = None
+    scene_intelligence: Optional[dict[str, Any]] = None
     latency_ms: float
     usage: dict[str, Any]
 
@@ -261,6 +263,8 @@ class CopilotRequest(BaseModel):
     fov_h_deg: float = Field(default=60.0, ge=20.0, le=140.0)
     model: AllowedModel = "gemini-4-hydrogen"
     previous_interaction_id: Optional[str] = None
+    real_photo_metrics: Optional[dict[str, Any]] = None
+    scene_intelligence: Optional[dict[str, Any]] = None
 
 
 class CopilotResponse(BaseModel):

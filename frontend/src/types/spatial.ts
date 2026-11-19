@@ -9,6 +9,62 @@ export type CameraViewMode = 'camera_aligned' | 'orbit' | 'bev' | 'isometric';
 
 export type AppSection = 'landing' | 'lab' | 'multiframe' | 'metrics';
 
+export type AnalyzeEngine =
+  | 'auto'
+  | 'hybrid_vlm_3d'
+  | 'moge2_local'
+  | 'gemini_live'
+  | 'salience_fallback';
+
+export interface ScalePriorCheck {
+  object_id: string;
+  label: string;
+  measured_max_m: number;
+  expected_typical_m: number;
+  ratio: number;
+  status: 'consistente' | 'subestimada' | 'sobreestimada' | string;
+  source?: string;
+}
+
+export interface SceneDiagnosisFinding {
+  title: string;
+  metric_evidence: string;
+  severity: 'info' | 'low' | 'medium' | 'high' | string;
+  interpretation: string;
+}
+
+export interface SceneDiagnosis {
+  domain: string;
+  domain_label_es: string;
+  diagnosis_title: string;
+  executive_summary: string;
+  model_predictions_es: string;
+  confidence_level: 'alta' | 'media' | 'baja' | string;
+  scale_consistency_note: string;
+  key_findings: SceneDiagnosisFinding[];
+  recommended_actions: string[];
+  scale_prior_checks?: ScalePriorCheck[];
+  diagnosis_source?: string;
+}
+
+export interface SceneIntelligence {
+  discovery_mode: string;
+  domain: string;
+  domain_label_es: string;
+  scene_context_es: string;
+  active_vocabulary: string[];
+  prompt_free_discoveries?: Array<{
+    label: string;
+    confidence: number;
+    box_2d?: number[] | null;
+  }>;
+  vlm_guided_count?: number;
+  detection_sources?: string[];
+  inspection_focus_es?: string[];
+  vlm_fallback_reason?: string;
+  diagnosis: SceneDiagnosis;
+}
+
 export interface Projected2D {
   vertices_2d: [number, number][];
   vertices_norm: [number, number][];
@@ -354,6 +410,7 @@ export interface AnalyzeResponse {
   depth_stats?: DepthStats | null;
   point_cloud?: PointCloudData | null;
   real_photo_metrics?: RealPhotoMetrics | null;
+  scene_intelligence?: SceneIntelligence | null;
   latency_ms: number;
   usage?: Record<string, unknown> | null;
   mode: string;

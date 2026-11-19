@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  AnalyzeEngine,
   AnalyzeResponse,
   AppSection,
   BenchmarkScene,
@@ -13,6 +14,7 @@ import type {
   PointCloudData,
   RealPhotoMetrics,
   SceneAction,
+  SceneIntelligence,
   SceneMetrics,
   SpatialObject,
   ThinkingLevel,
@@ -54,6 +56,8 @@ export function App() {
   const [activeSection, setActiveSection] = useState<AppSection>(initialQuery.current.view);
   const [selectedModel, setSelectedModel] = useState<GeminiModelId>('gemini-4-hydrogen');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high');
+  const [selectedEngine, setSelectedEngine] = useState<AnalyzeEngine>('auto');
+  const [customPrompt, setCustomPrompt] = useState<string>('');
 
   // Privacy-first in-memory API key only (never stored in localStorage/cookies)
   const [apiKey, setApiKey] = useState<string>('');
@@ -85,6 +89,7 @@ export function App() {
   const [depthStats, setDepthStats] = useState<DepthStats | null>(null);
   const [fovSource, setFovSource] = useState<string | null>(null);
   const [realPhotoMetrics, setRealPhotoMetrics] = useState<RealPhotoMetrics | null>(null);
+  const [sceneIntelligence, setSceneIntelligence] = useState<SceneIntelligence | null>(null);
   const [fovManualOverride, setFovManualOverride] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [modeBadge, setModeBadge] = useState<string>('calibrated_demo');
@@ -206,6 +211,7 @@ export function App() {
         setMetrics(res.metrics ?? null);
         setFovSweep(res.fov_sweep ?? null);
         setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
+        setSceneIntelligence(res.scene_intelligence ?? null);
         setModeBadge(res.mode ?? 'calibrated_demo');
         setNotice(res.notice ?? null);
         if (target.id === 'occlusion_corridor') {
@@ -321,8 +327,10 @@ export function App() {
               model: selectedModel,
               thinking_level: thinkingLevel,
               fov_h_deg: fovHDeg,
-              engine: 'auto',
+              custom_prompt: customPrompt.trim() || undefined,
+              engine: selectedEngine,
               auto_fov: true,
+              enable_diagnosis: true,
               max_objects: 10,
             },
             apiKey
@@ -333,6 +341,7 @@ export function App() {
           setMetrics(res.metrics ?? null);
           setFovSweep(res.fov_sweep ?? null);
           setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
+          setSceneIntelligence(res.scene_intelligence ?? null);
           setModeBadge(res.mode ?? 'calibrated_demo');
           setNotice(res.notice ?? null);
           applyLocal3DTelemetry(res);
@@ -374,8 +383,10 @@ export function App() {
           model: selectedModel,
           thinking_level: thinkingLevel,
           fov_h_deg: fovHDeg,
-          engine: 'auto',
+          custom_prompt: customPrompt.trim() || undefined,
+          engine: selectedEngine,
           auto_fov: !fovManualOverride,
+          enable_diagnosis: true,
           max_objects: 10,
         },
         apiKey
@@ -386,6 +397,7 @@ export function App() {
       setMetrics(res.metrics ?? null);
       setFovSweep(res.fov_sweep ?? null);
       setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
+      setSceneIntelligence(res.scene_intelligence ?? null);
       setModeBadge(res.mode ?? 'live');
       setNotice(res.notice ?? null);
       applyLocal3DTelemetry(res);
@@ -591,6 +603,8 @@ export function App() {
             fovHDeg={fovHDeg}
             thinkingLevel={thinkingLevel}
             selectedModel={selectedModel}
+            selectedEngine={selectedEngine}
+            customPrompt={customPrompt}
             unfoldProgress={unfoldProgress}
             showGroundTruth={showGroundTruth}
             showOcclusionRays={showOcclusionRays}
@@ -604,6 +618,8 @@ export function App() {
             occlusionMatrix={occlusionMatrix}
             metrics={metrics}
             intrinsicDiagnostics={intrinsicDiagnostics}
+            realPhotoMetrics={realPhotoMetrics}
+            sceneIntelligence={sceneIntelligence}
             pointCloud={pointCloud}
             depthMapBase64={depthMapBase64}
             depthStats={depthStats}
@@ -623,6 +639,8 @@ export function App() {
             onUploadFile={handleUploadFile}
             onChangeFovH={handleChangeFovH}
             onChangeThinkingLevel={setThinkingLevel}
+            onChangeEngine={setSelectedEngine}
+            onChangeCustomPrompt={setCustomPrompt}
             onChangeUnfoldProgress={setUnfoldProgress}
             onToggleGroundTruth={() => setShowGroundTruth((v) => !v)}
             onToggleOcclusionRays={() => setShowOcclusionRays((v) => !v)}

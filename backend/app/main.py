@@ -58,6 +58,10 @@ from app.services.local_metric_3d import (
     is_local_3d_available,
     run_local_metric_3d,
 )
+from app.services.scene_intelligence import (
+    build_scene_intelligence_payload,
+    discover_scene_vocabulary_vlm,
+)
 from app.services.spatial_agent import run_spatial_copilot
 
 app = FastAPI(
@@ -160,6 +164,23 @@ def get_benchmarks() -> BenchmarksResponse:
     return BenchmarksResponse(benchmarks=summaries)
 
 
+def _merge_token_usage(acc: dict[str, Any], extra: Optional[dict[str, Any]]) -> dict[str, int]:
+    """Accumulate token counters across discovery, 3D detection, and grounded diagnosis calls."""
+    if not extra:
+        return {
+            "input_tokens": int(acc.get("input_tokens", 0)),
+            "output_tokens": int(acc.get("output_tokens", 0)),
+            "thought_tokens": int(acc.get("thought_tokens", 0)),
+            "total_tokens": int(acc.get("total_tokens", 0)),
+        }
+    return {
+        "input_tokens": int(acc.get("input_tokens", 0)) + int(extra.get("input_tokens", 0)),
+        "output_tokens": int(acc.get("output_tokens", 0)) + int(extra.get("output_tokens", 0)),
+        "thought_tokens": int(acc.get("thought_tokens", 0)) + int(extra.get("thought_tokens", 0)),
+        "total_tokens": int(acc.get("total_tokens", 0)) + int(extra.get("total_tokens", 0)),
+    }
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 def analyze_scene(
     req: AnalyzeRequest,
@@ -203,11 +224,144 @@ def analyze_scene(
     depth_stats: Optional[dict[str, float]] = None
     point_cloud: Optional[dict[str, Any]] = None
     real_photo_metrics: Optional[dict[str, Any]] = None
+    discovery_meta: Optional[dict[str, Any]] = None
 
     use_local_depth = req.engine != "salience_fallback" and is_local_3d_available()
 
-    if api_key and req.engine in ("auto", "gemini_live") and not req.force_demo:
-        if benchmark is None and use_local_depth:
+    def _apply_local_result(local_res: dict[str, Any]) -> None:
+        nonlocal image_b64, mime_type, width, height, effective_fov_h_deg, fov_source
+        nonlocal exif_fov_h_deg, estimated_moge_fov_h_deg, raw_objects, scene_summary
+        nonlocal depth_map_base64, depth_stats, point_cloud, real_photo_metrics
+        nonlocal latency_ms, mode, discovery_meta
+
+        image_b64 = local_res["image_base64"]
+        mime_type = local_res["mime_type"]
+        width = int(local_res["width"])
+        height = int(local_res["height"])
+        effective_fov_h_deg = float(local_res["effective_fov_h_deg"])
+        fov_source = str(local_res["fov_source"])
+        exif_fov_h_deg = local_res["exif_fov_h_deg"]
+        estimated_moge_fov_h_deg = local_res["estimated_moge_fov_h_deg"]
+        raw_objects = local_res["objects"]
+        scene_summary = local_res["scene_summary"]
+        depth_map_base64 = local_res["depth_map_base64"]
+        depth_stats = local_res["depth_stats"]
+        point_cloud = local_res["point_cloud"]
+        real_photo_metrics = local_res.get("real_photo_metrics")
+        discovery_meta = local_res.get("discovery_meta")
+        latency_ms = local_res["latency_ms"]
+        mode = local_res["mode"]
+
+    def _run_salience_fallback(reason_notice: str) -> None:
+        nonlocal raw_objects, scene_summary, latency_ms, usage, mode, notice
+        fb = build_deterministic_fallback_detections(
+            width=width,
+            height=height,
+            fov_h_deg=effective_fov_h_deg,
+            model=req.model,
+            thinking_level=thinking_level,
+            max_objects=req.max_objects,
+            image_base64=image_b64,
+        )
+        raw_objects = fb["objects"]
+        scene_summary = fb["scene_summary"]
+        latency_ms = fb["latency_ms"]
+        usage = fb["usage"]
+        mode = "deterministic_fallback"
+        notice = reason_notice
+
+    if benchmark is not None:
+        # Calibrated benchmarks preserve exact single-call Gemini Live behavior or deterministic demo
+        if api_key and req.engine in ("auto", "gemini_live", "hybrid_vlm_3d") and not req.force_demo:
+            try:
+                live = detect_3d_objects_live(
+                    api_key=api_key,
+                    image_base64=image_b64,
+                    mime_type=mime_type,
+                    model=req.model,
+                    thinking_level=thinking_level,
+                    fov_h_deg=effective_fov_h_deg,
+                    max_objects=req.max_objects,
+                    custom_prompt=req.custom_prompt,
+                )
+                raw_objects = live["objects"]
+                scene_summary = live["scene_summary"]
+                latency_ms = live["latency_ms"]
+                usage = live["usage"]
+                mode = "live_gemini"
+                notice = None
+            except Exception as exc:
+                mode = "deterministic_fallback"
+                notice = (
+                    f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
+                    "se activó el modo de respaldo calibrado/determinista."
+                )
+                raw_objects, latency_ms, usage = _extract_demo_prediction(benchmark, req.model)
+                raw_objects = raw_objects[: req.max_objects]
+                scene_summary = f"Respaldo calibrado para {benchmark['title']} ({req.model})."
+        else:
+            raw_objects, latency_ms, usage = _extract_demo_prediction(benchmark, req.model)
+            raw_objects = raw_objects[: req.max_objects]
+            mode = "calibrated_demo"
+            scene_summary = f"Benchmark calibrado '{benchmark['title']}' evaluado con perfil {req.model}."
+            if req.force_demo:
+                notice = "Modo demo calibrado solicitado explícitamente (sin llamada externa a Google AI Studio)."
+            else:
+                notice = (
+                    "Sin API Key de Google AI Studio configurada: ejecutando benchmark calibrado reproducible "
+                    "(SEED=42). Ingresa tu clave en el botón API Key para inferencia live."
+                )
+    elif api_key and use_local_depth and req.engine in ("auto", "hybrid_vlm_3d") and not req.force_demo:
+        # Case A: Hybrid VLM Scene Discovery -> Open-Vocab YOLOE-OV -> Metric MoGe-2 3D Lifting
+        vlm_discovery: Optional[dict[str, Any]] = None
+        vlm_notice = ""
+        try:
+            vlm_discovery = discover_scene_vocabulary_vlm(
+                api_key=api_key,
+                image_base64=image_b64,
+                mime_type=mime_type,
+                model=req.model,
+                custom_prompt=req.custom_prompt,
+            )
+            usage = _merge_token_usage(usage, vlm_discovery.get("usage"))
+        except Exception as exc:
+            vlm_discovery = None
+            vlm_notice = f"Descubrimiento VLM omitido ({type(exc).__name__}); "
+
+        try:
+            local_res = run_local_metric_3d(
+                image_b64,
+                fov_override_deg=effective_fov_h_deg,
+                auto_fov=req.auto_fov,
+                max_objects=req.max_objects,
+                custom_prompt=req.custom_prompt,
+                vlm_discovery=vlm_discovery,
+            )
+            _apply_local_result(local_res)
+            d_min = float((depth_stats or {}).get("min_m", 0.0))
+            d_max = float((depth_stats or {}).get("max_m", 0.0))
+            if vlm_discovery is not None:
+                latency_ms = round(float(latency_ms) + float(vlm_discovery.get("latency_ms", 0.0)), 2)
+                notice = (
+                    f"Pipeline Híbrido VLM → YOLOE-OV → MoGe-2 activo ({local_res['model_desc']}): "
+                    f"rango {d_min:.2f}–{d_max:.2f} m "
+                    f"(FOV_h={effective_fov_h_deg:.1f}° vía {fov_source})."
+                )
+            else:
+                notice = (
+                    f"{vlm_notice}Reconstrucción métrica local real en {local_res['model_desc']}: "
+                    f"rango {d_min:.2f}–{d_max:.2f} m "
+                    f"(FOV_h={effective_fov_h_deg:.1f}° vía {fov_source})."
+                )
+        except Exception as exc:
+            _run_salience_fallback(
+                f"Motor híbrido VLM + MoGe-2 falló ({type(exc).__name__}); usando extractor de saliencia sin referencia."
+            )
+    elif api_key and not req.force_demo and (
+        req.engine == "gemini_live" or (req.engine in ("auto", "hybrid_vlm_3d") and not use_local_depth)
+    ):
+        # Case B: Gemini Live 9-DOF inference (optionally enriched with MoGe-2 depth/surfels)
+        if use_local_depth:
             try:
                 depth_ctx = extract_depth_and_point_cloud(
                     image_b64,
@@ -238,20 +392,11 @@ def analyze_scene(
             raw_objects = live["objects"]
             scene_summary = live["scene_summary"]
             latency_ms = live["latency_ms"]
-            usage = live["usage"]
+            usage = _merge_token_usage(usage, live["usage"])
             mode = "live_gemini"
             notice = None
         except Exception as exc:
-            if benchmark is not None and req.engine != "moge2_local":
-                mode = "deterministic_fallback"
-                notice = (
-                    f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
-                    "se activó el modo de respaldo calibrado/determinista."
-                )
-                raw_objects, latency_ms, usage = _extract_demo_prediction(benchmark, req.model)
-                raw_objects = raw_objects[: req.max_objects]
-                scene_summary = f"Respaldo calibrado para {benchmark['title']} ({req.model})."
-            elif use_local_depth:
+            if use_local_depth:
                 try:
                     local_res = run_local_metric_3d(
                         image_b64,
@@ -260,145 +405,47 @@ def analyze_scene(
                         max_objects=req.max_objects,
                         custom_prompt=req.custom_prompt,
                     )
-                    image_b64 = local_res["image_base64"]
-                    mime_type = local_res["mime_type"]
-                    width = int(local_res["width"])
-                    height = int(local_res["height"])
-                    effective_fov_h_deg = float(local_res["effective_fov_h_deg"])
-                    fov_source = str(local_res["fov_source"])
-                    exif_fov_h_deg = local_res["exif_fov_h_deg"]
-                    estimated_moge_fov_h_deg = local_res["estimated_moge_fov_h_deg"]
-                    raw_objects = local_res["objects"]
-                    scene_summary = local_res["scene_summary"]
-                    depth_map_base64 = local_res["depth_map_base64"]
-                    depth_stats = local_res["depth_stats"]
-                    point_cloud = local_res["point_cloud"]
-                    real_photo_metrics = local_res.get("real_photo_metrics")
-                    latency_ms = local_res["latency_ms"]
-                    mode = local_res["mode"]
+                    _apply_local_result(local_res)
                     notice = (
                         f"Google AI Studio live no disponible ({type(exc).__name__}); "
                         f"reconstrucción métrica local activa vía {local_res['model_desc']}."
                     )
                 except Exception:
-                    fb = build_deterministic_fallback_detections(
-                        width=width,
-                        height=height,
-                        fov_h_deg=effective_fov_h_deg,
-                        model=req.model,
-                        thinking_level=thinking_level,
-                        max_objects=req.max_objects,
-                        image_base64=image_b64,
-                    )
-                    raw_objects = fb["objects"]
-                    scene_summary = fb["scene_summary"]
-                    latency_ms = fb["latency_ms"]
-                    usage = fb["usage"]
-                    mode = "deterministic_fallback"
-                    notice = (
-                        f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
-                        "se activó el modo de respaldo determinista."
+                    _run_salience_fallback(
+                        f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); se activó el modo de respaldo determinista."
                     )
             else:
-                mode = "deterministic_fallback"
-                notice = (
-                    f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); "
-                    "se activó el modo de respaldo calibrado/determinista."
+                _run_salience_fallback(
+                    f"Inferencia live con Google AI Studio falló ({type(exc).__name__}); se activó el modo de respaldo determinista."
                 )
-                fb = build_deterministic_fallback_detections(
-                    width=width,
-                    height=height,
-                    fov_h_deg=effective_fov_h_deg,
-                    model=req.model,
-                    thinking_level=thinking_level,
-                    max_objects=req.max_objects,
-                    image_base64=image_b64,
-                )
-                raw_objects = fb["objects"]
-                scene_summary = fb["scene_summary"]
-                latency_ms = fb["latency_ms"]
-                usage = fb["usage"]
-    else:
-        if benchmark is not None and req.engine != "moge2_local":
-            raw_objects, latency_ms, usage = _extract_demo_prediction(benchmark, req.model)
-            raw_objects = raw_objects[: req.max_objects]
-            mode = "calibrated_demo"
-            scene_summary = f"Benchmark calibrado '{benchmark['title']}' evaluado con perfil {req.model}."
-            if req.force_demo:
-                notice = "Modo demo calibrado solicitado explícitamente (sin llamada externa a Google AI Studio)."
-            else:
-                notice = (
-                    "Sin API Key de Google AI Studio configurada: ejecutando benchmark calibrado reproducible "
-                    "(SEED=42). Ingresa tu clave en el botón API Key para inferencia live."
-                )
-        elif req.engine in ("auto", "moge2_local") and not req.force_demo and is_local_3d_available():
-            try:
-                local_res = run_local_metric_3d(
-                    image_b64,
-                    fov_override_deg=effective_fov_h_deg,
-                    auto_fov=req.auto_fov,
-                    max_objects=req.max_objects,
-                    custom_prompt=req.custom_prompt,
-                )
-                image_b64 = local_res["image_base64"]
-                mime_type = local_res["mime_type"]
-                width = int(local_res["width"])
-                height = int(local_res["height"])
-                effective_fov_h_deg = float(local_res["effective_fov_h_deg"])
-                fov_source = str(local_res["fov_source"])
-                exif_fov_h_deg = local_res["exif_fov_h_deg"]
-                estimated_moge_fov_h_deg = local_res["estimated_moge_fov_h_deg"]
-                raw_objects = local_res["objects"]
-                scene_summary = local_res["scene_summary"]
-                depth_map_base64 = local_res["depth_map_base64"]
-                depth_stats = local_res["depth_stats"]
-                point_cloud = local_res["point_cloud"]
-                real_photo_metrics = local_res.get("real_photo_metrics")
-                latency_ms = local_res["latency_ms"]
-                mode = local_res["mode"]
-                notice = (
-                    f"Reconstrucción métrica local real en {local_res['model_desc']}: "
-                    f"rango {depth_stats['min_m']:.2f}–{depth_stats['max_m']:.2f} m "
-                    f"(FOV_h={effective_fov_h_deg:.1f}° vía {fov_source})."
-                )
-            except Exception as exc:
-                fb = build_deterministic_fallback_detections(
-                    width=width,
-                    height=height,
-                    fov_h_deg=effective_fov_h_deg,
-                    model=req.model,
-                    thinking_level=thinking_level,
-                    max_objects=req.max_objects,
-                    image_base64=image_b64,
-                )
-                raw_objects = fb["objects"]
-                scene_summary = fb["scene_summary"]
-                latency_ms = fb["latency_ms"]
-                usage = fb["usage"]
-                mode = "deterministic_fallback"
-                notice = (
-                    f"Motor métrico local MoGe-2 falló ({type(exc).__name__}); "
-                    "usando extractor de saliencia sin referencia."
-                )
-        else:
-            fb = build_deterministic_fallback_detections(
-                width=width,
-                height=height,
-                fov_h_deg=effective_fov_h_deg,
-                model=req.model,
-                thinking_level=thinking_level,
+    elif use_local_depth and not req.force_demo and req.engine in ("auto", "hybrid_vlm_3d", "moge2_local"):
+        # Case C: Autonomous local dual-pass GPU/CPU (YOLOE-PF 4585 -> Domain -> YOLOE-OV -> MoGe-2)
+        try:
+            local_res = run_local_metric_3d(
+                image_b64,
+                fov_override_deg=effective_fov_h_deg,
+                auto_fov=req.auto_fov,
                 max_objects=req.max_objects,
-                image_base64=image_b64,
+                custom_prompt=req.custom_prompt,
             )
-            raw_objects = fb["objects"]
-            scene_summary = fb["scene_summary"]
-            latency_ms = fb["latency_ms"]
-            usage = fb["usage"]
-            mode = "deterministic_fallback"
+            _apply_local_result(local_res)
+            d_min = float((depth_stats or {}).get("min_m", 0.0))
+            d_max = float((depth_stats or {}).get("max_m", 0.0))
             notice = (
-                "Imagen personalizada analizada con extracción adaptativa de saliencia + diagnóstico intrínseco "
-                "sin referencia (sin X-Gemini-API-Key / GEMINI_API_KEY)."
+                f"Reconstrucción métrica local real en {local_res['model_desc']}: "
+                f"rango {d_min:.2f}–{d_max:.2f} m "
+                f"(FOV_h={effective_fov_h_deg:.1f}° vía {fov_source})."
             )
+        except Exception as exc:
+            _run_salience_fallback(
+                f"Motor métrico local MoGe-2 falló ({type(exc).__name__}); usando extractor de saliencia sin referencia."
+            )
+    else:
+        # Case D: Deterministic salience fallback without reference
+        _run_salience_fallback(
+            "Imagen personalizada analizada con extracción adaptativa de saliencia + diagnóstico intrínseco "
+            "sin referencia (sin X-Gemini-API-Key / GEMINI_API_KEY)."
+        )
 
     fov_v_deg = round(compute_fov_v_deg(effective_fov_h_deg, width, height), 4)
     enriched_objects = [_enrich_object(obj, width, height, effective_fov_h_deg) for obj in raw_objects]
@@ -417,6 +464,31 @@ def analyze_scene(
         occlusion_matrix=occlusion_matrix,
         real_photo_metrics=real_photo_metrics,
     )
+
+    scene_intelligence: Optional[dict[str, Any]] = None
+    if req.enable_diagnosis:
+        allow_vlm_diag = (
+            benchmark is None
+            and bool(api_key)
+            and not req.force_demo
+            and req.engine in ("auto", "hybrid_vlm_3d", "gemini_live")
+        )
+        scene_intelligence, diag_usage = build_scene_intelligence_payload(
+            discovery=discovery_meta,
+            objects=raw_objects,
+            occlusion_matrix=occlusion_matrix,
+            intrinsic_diagnostics=intrinsic_diagnostics,
+            real_photo_metrics=real_photo_metrics,
+            depth_stats=depth_stats,
+            point_cloud=point_cloud,
+            custom_prompt=req.custom_prompt,
+            image_base64=image_b64,
+            mime_type=mime_type,
+            model=req.model,
+            api_key=api_key,
+            allow_live_vlm=allow_vlm_diag,
+        )
+        usage = _merge_token_usage(usage, diag_usage)
 
     metrics = None
     fov_sweep = intrinsic_diagnostics["reference_free_fov_sweep"]
@@ -450,6 +522,7 @@ def analyze_scene(
         depth_stats=depth_stats,
         point_cloud=point_cloud,
         real_photo_metrics=real_photo_metrics,
+        scene_intelligence=scene_intelligence,
         latency_ms=latency_ms,
         usage=usage,
     )
@@ -721,5 +794,7 @@ def spatial_copilot(
         model=req.model,
         previous_interaction_id=req.previous_interaction_id,
         api_key=api_key,
+        real_photo_metrics=req.real_photo_metrics,
+        scene_intelligence=req.scene_intelligence,
     )
     return CopilotResponse(**result)

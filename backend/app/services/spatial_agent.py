@@ -25,13 +25,18 @@ from app.services.gemini_vision import (
     extract_usage,
     resolve_thinking_level,
 )
+from app.services.scene_intelligence import (
+    build_scene_intelligence_payload,
+    evaluate_scale_priors,
+)
 
 COPILOT_SYSTEM_INSTRUCTION = (
     "Eres el Copiloto Espacial 3D de MyLeenTo3, un asistente científico de visión computacional 3D. "
     "NUNCA calcules distancias, volúmenes, colisiones, oclusiones ni métricas mentalmente: "
     "SIEMPRE invoca las herramientas deterministas provistas (`focus_object`, `measure_distance`, "
     "`set_camera_view`, `analyze_occlusions_and_collisions`, `filter_objects`, "
-    "`run_fov_sensitivity_sweep`, `evaluate_escalation_policy`) para obtener resultados exactos y controlar el visor 3D. "
+    "`run_fov_sensitivity_sweep`, `evaluate_escalation_policy`, `generate_domain_diagnosis`) "
+    "para obtener resultados exactos y controlar el visor 3D. "
     "Responde en español técnico claro, conciso y cuantitativo usando exclusivamente los valores "
     "retornados por las herramientas (metros, grados, porcentajes y veredictos)."
 )
@@ -136,6 +141,15 @@ COPILOT_TOOLS: list[dict[str, Any]] = [
             "properties": {},
         },
     },
+    {
+        "type": "function",
+        "name": "generate_domain_diagnosis",
+        "description": "Generates a 3D-grounded domain-adaptive diagnostic report and checks measured 3D object extents against physical scale priors (returns domain, scale consistency verdict, key quantitative findings, and recommended inspection actions).",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 
@@ -157,6 +171,8 @@ class SpatialToolbox:
         width: int,
         height: int,
         fov_h_deg: float,
+        real_photo_metrics: Optional[dict[str, Any]] = None,
+        scene_intelligence: Optional[dict[str, Any]] = None,
     ) -> None:
         self.objects = [{k: v for k, v in obj.items() if v is not None} for obj in objects]
         self.gt_objects = (
@@ -168,6 +184,8 @@ class SpatialToolbox:
         self.width = width
         self.height = height
         self.fov_h_deg = fov_h_deg
+        self.real_photo_metrics = real_photo_metrics
+        self.scene_intelligence = scene_intelligence
         self.tool_trace: list[dict[str, Any]] = []
         self.scene_actions: list[dict[str, Any]] = []
 
@@ -196,6 +214,7 @@ class SpatialToolbox:
             "filter_objects": self.filter_objects,
             "run_fov_sensitivity_sweep": self.run_fov_sensitivity_sweep,
             "evaluate_escalation_policy": self.evaluate_escalation_policy,
+            "generate_domain_diagnosis": self.generate_domain_diagnosis,
         }
         handler = handler_map.get(name)
         if handler is None:
@@ -443,6 +462,55 @@ class SpatialToolbox:
             "scene_graph_3d": scene_graph[:5],
         }
 
+    def generate_domain_diagnosis(self) -> dict[str, Any]:
+        scale_checks, scale_note = evaluate_scale_priors(self.objects)
+        if self.scene_intelligence and isinstance(self.scene_intelligence.get("diagnosis"), dict):
+            diag = dict(self.scene_intelligence["diagnosis"])
+            if not diag.get("scale_prior_checks") and scale_checks:
+                diag["scale_prior_checks"] = scale_checks
+            if not diag.get("scale_consistency_note"):
+                diag["scale_consistency_note"] = scale_note
+            return {
+                "domain": self.scene_intelligence.get("domain", diag.get("domain", "general_physical")),
+                "domain_label_es": self.scene_intelligence.get(
+                    "domain_label_es", diag.get("domain_label_es", "Inspección Física General")
+                ),
+                "discovery_mode": self.scene_intelligence.get("discovery_mode", "local_yoloe_pf_adaptive"),
+                "active_vocabulary": list(self.scene_intelligence.get("active_vocabulary") or [])[:12],
+                "diagnosis": diag,
+                "scale_prior_checks": scale_checks,
+                "scale_consistency_note": diag.get("scale_consistency_note", scale_note),
+            }
+
+        occlusions = compute_occlusion_matrix(self.objects)
+        intrinsic_diag = compute_intrinsic_scene_diagnostics(
+            self.objects,
+            self.image_base64,
+            self.width,
+            self.height,
+            self.fov_h_deg,
+            occlusion_matrix=occlusions,
+            real_photo_metrics=self.real_photo_metrics,
+        )
+        intelligence, _ = build_scene_intelligence_payload(
+            discovery=None,
+            objects=self.objects,
+            occlusion_matrix=occlusions,
+            intrinsic_diagnostics=intrinsic_diag,
+            real_photo_metrics=self.real_photo_metrics,
+            allow_live_vlm=False,
+        )
+        diag = intelligence["diagnosis"]
+        return {
+            "domain": intelligence["domain"],
+            "domain_label_es": intelligence["domain_label_es"],
+            "discovery_mode": intelligence["discovery_mode"],
+            "active_vocabulary": intelligence.get("active_vocabulary", [])[:12],
+            "diagnosis": diag,
+            "scale_prior_checks": diag.get("scale_prior_checks", scale_checks),
+            "scale_consistency_note": diag.get("scale_consistency_note", scale_note),
+        }
+
 
 def _scene_context_block(
     objects: list[dict[str, Any]],
@@ -450,6 +518,7 @@ def _scene_context_block(
     width: int,
     height: int,
     fov_h_deg: float,
+    scene_intelligence: Optional[dict[str, Any]] = None,
 ) -> str:
     compact = [
         {
@@ -459,9 +528,17 @@ def _scene_context_block(
         }
         for o in objects
     ]
+    domain_line = ""
+    if scene_intelligence:
+        dom = scene_intelligence.get("domain_label_es") or scene_intelligence.get("domain")
+        scale_note = (scene_intelligence.get("diagnosis") or {}).get("scale_consistency_note", "")
+        if dom:
+            domain_line = f", dominio='{dom}'"
+        if scale_note:
+            domain_line += f", nota_escala='{scale_note}'"
     return (
         f"Contexto de escena 3D activa ({width}x{height}px, FOV_h={fov_h_deg:.1f}°, "
-        f"ground_truth_disponible={bool(gt_objects)}):\n"
+        f"ground_truth_disponible={bool(gt_objects)}{domain_line}):\n"
         f"{json.dumps(compact, ensure_ascii=False)}"
     )
 
@@ -498,7 +575,7 @@ def _merge_usage(acc: dict[str, int], new: dict[str, Any]) -> dict[str, int]:
 
 
 def _run_offline_router(message: str, toolbox: SpatialToolbox) -> str:
-    """Deterministic Spanish/English command router invoking the exact same 7 Python tools."""
+    """Deterministic Spanish/English command router invoking the exact same 8 Python tools."""
     norm = _normalize_text(message)
     objects = toolbox.objects
     parts: list[str] = []
@@ -683,6 +760,39 @@ def _run_offline_router(message: str, toolbox: SpatialToolbox) -> str:
             f"{clr_txt}). Motivo: {reasons_txt}"
         )
 
+    # 6c. Domain-Adaptive 3D-Grounded Diagnosis & Scale Priors
+    if any(
+        k in norm
+        for k in [
+            "diagnostico",
+            "predic",
+            "dominio",
+            "verifica escala",
+            "escala fisica",
+            "escala de",
+            "que ves",
+            "que es",
+            "inspeccion",
+            "recomendacion",
+        ]
+    ):
+        res = toolbox.execute("generate_domain_diagnosis", {})
+        diag = res.get("diagnosis") or {}
+        findings = diag.get("key_findings") or []
+        top_finding = (
+            f" Hallazgo clave: **{findings[0]['title']}** (`{findings[0]['metric_evidence']}`) — {findings[0]['interpretation']}"
+            if findings
+            else ""
+        )
+        actions = diag.get("recommended_actions") or []
+        action_txt = f" Acción sugerida: {actions[0]}" if actions else ""
+        parts.append(
+            f"Diagnóstico 3D adaptativo (`{res.get('domain_label_es', 'Inspección Física General')}`, "
+            f"confianza **{diag.get('confidence_level', 'media')}**): "
+            f"{diag.get('executive_summary', '')} {res.get('scale_consistency_note', '')}"
+            f"{top_finding}{action_txt}".strip()
+        )
+
     # Fallback overview if no specific command matched
     if not parts:
         nearest = sorted_by_depth[0]
@@ -692,8 +802,9 @@ def _run_offline_router(message: str, toolbox: SpatialToolbox) -> str:
             f"Escena activa con **{len(objects)} objetos** en rango de profundidad "
             f"**{nearest['box_3d'][1]:.2f} m – {farthest['box_3d'][1]:.2f} m**. "
             f"Enfoqué el más cercano (`{res['label']}`). "
-            "Puedes pedirme: medir distancias, evaluar la compuerta de escalamiento Edge → 3D, "
-            "analizar oclusiones y colisiones, cambiar la vista (`bev`, `orbit`, `isometric`, `camera_aligned`), "
+            "Puedes pedirme: generar diagnóstico 3D y verificar escala, medir distancias, "
+            "evaluar la compuerta de escalamiento Edge → 3D, analizar oclusiones y colisiones, "
+            "cambiar la vista (`bev`, `orbit`, `isometric`, `camera_aligned`), "
             "filtrar por profundidad o ejecutar el barrido de sensibilidad FOV."
         )
 
@@ -712,6 +823,8 @@ def run_spatial_copilot(
     model: str = "gemini-4-hydrogen",
     previous_interaction_id: Optional[str] = None,
     api_key: Optional[str] = None,
+    real_photo_metrics: Optional[dict[str, Any]] = None,
+    scene_intelligence: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Run Spatial Copilot via live Gemini Function Calling or deterministic offline router."""
     t0 = time.perf_counter()
@@ -722,6 +835,8 @@ def run_spatial_copilot(
         width=width,
         height=height,
         fov_h_deg=fov_h_deg,
+        real_photo_metrics=real_photo_metrics,
+        scene_intelligence=scene_intelligence,
     )
 
     if not api_key:
@@ -732,7 +847,7 @@ def run_spatial_copilot(
             "mode": "offline_demo",
             "notice": (
                 "Ejecutado con el enrutador determinista local (sin API key de Google AI Studio). "
-                "Se invocaron exactamente las mismas 7 herramientas geométricas Python."
+                "Se invocaron exactamente las mismas 8 herramientas geométricas Python."
             ),
             "model": model,
             "interaction_id": None,
@@ -744,7 +859,14 @@ def run_spatial_copilot(
 
     thinking_level = resolve_thinking_level(model, None)
     gen_config = {"temperature": 0.2, "thinking_level": thinking_level}
-    scene_ctx = _scene_context_block(objects, gt_objects, width, height, fov_h_deg)
+    scene_ctx = _scene_context_block(
+        objects,
+        gt_objects,
+        width,
+        height,
+        fov_h_deg,
+        scene_intelligence=scene_intelligence,
+    )
     user_input: Any = f"{scene_ctx}\n\nConsulta del usuario: {message}"
 
     total_usage = {"input_tokens": 0, "output_tokens": 0, "thought_tokens": 0, "total_tokens": 0}
@@ -827,6 +949,8 @@ def run_spatial_copilot(
             width=width,
             height=height,
             fov_h_deg=fov_h_deg,
+            real_photo_metrics=real_photo_metrics,
+            scene_intelligence=scene_intelligence,
         )
         reply = _run_offline_router(message, fallback_toolbox)
         latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)

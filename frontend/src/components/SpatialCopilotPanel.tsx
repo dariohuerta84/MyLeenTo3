@@ -12,7 +12,9 @@ import type {
   ChatMessage,
   CopilotToolTrace,
   GeminiModelId,
+  RealPhotoMetrics,
   SceneAction,
+  SceneIntelligence,
   SpatialObject,
 } from '../types/spatial';
 import { sendCopilotMessage } from '../services/api';
@@ -25,11 +27,14 @@ interface SpatialCopilotPanelProps {
   height: number;
   fovHDeg: number;
   selectedModel: GeminiModelId;
+  realPhotoMetrics?: RealPhotoMetrics | null;
+  sceneIntelligence?: SceneIntelligence | null;
   apiKey: string;
   onExecuteSceneActions: (actions: SceneAction[]) => void;
 }
 
 const QUICK_PROMPTS = [
+  'Genera diagnóstico 3D y verifica escala de esta imagen',
   'Mide la distancia entre los 2 objetos más cercanos',
   '¿Conviene escalar el modelo 3D o es confiable esta escena?',
   'Analiza oclusiones y colisiones',
@@ -134,6 +139,8 @@ export const SpatialCopilotPanel: React.FC<SpatialCopilotPanelProps> = ({
   height,
   fovHDeg,
   selectedModel,
+  realPhotoMetrics,
+  sceneIntelligence,
   apiKey,
   onExecuteSceneActions,
 }) => {
@@ -185,6 +192,8 @@ export const SpatialCopilotPanel: React.FC<SpatialCopilotPanelProps> = ({
           fov_h_deg: fovHDeg,
           model: selectedModel,
           previous_interaction_id: interactionId,
+          real_photo_metrics: realPhotoMetrics ?? undefined,
+          scene_intelligence: sceneIntelligence ?? undefined,
         },
         apiKey
       );

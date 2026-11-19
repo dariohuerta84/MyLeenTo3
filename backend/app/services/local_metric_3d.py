@@ -80,6 +80,8 @@ _MODEL_LOCK = threading.Lock()
 _MOGE_MODEL: Any = None
 _SEG_MODEL: Any = None
 _SEG_MODEL_KIND: str = "unloaded"
+_PF_MODEL: Any = None
+_PF_MODEL_KIND: str = "unloaded"
 _OV_MODEL: Any = None
 _OV_CLASSES_CACHE: Optional[tuple[str, ...]] = None
 _LOCAL_DEVICE: str = "cpu"
@@ -192,12 +194,40 @@ def get_local_3d_status() -> dict[str, Any]:
     except Exception:
         dev_name = "cpu"
 
-    seg_name = _SEG_MODEL_KIND if _SEG_MODEL_KIND != "unloaded" else YOLOE_OV_WEIGHTS
+    seg_name = _SEG_MODEL_KIND if _SEG_MODEL_KIND != "unloaded" else f"YOLOE-OV ({YOLOE_OV_WEIGHTS})"
+    pf_name = _PF_MODEL_KIND if _PF_MODEL_KIND != "unloaded" else f"YOLOE-pf ({YOLOE_PF_WEIGHTS}, 4585 cl.)"
+    models_list = [MOGE_MODEL_ID, seg_name]
+    if pf_name not in models_list and YOLOE_PF_WEIGHTS:
+        models_list.append(pf_name)
     return {
         "available": True,
         "device": dev_name,
-        "models": [MOGE_MODEL_ID, seg_name],
+        "models": models_list,
     }
+
+
+def _load_prompt_free_segmenter(device: Optional[str] = None) -> tuple[Any, str]:
+    """Thread-safe lazy loader for YOLOE Prompt-Free (4,585 open-world categories)."""
+    global _PF_MODEL, _PF_MODEL_KIND
+
+    try:
+        import torch
+        from ultralytics import YOLOE  # type: ignore
+    except Exception:
+        return None, "unavailable"
+
+    with _MODEL_LOCK:
+        target_dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if _PF_MODEL is None:
+            try:
+                _PF_MODEL = YOLOE(YOLOE_PF_WEIGHTS)
+                if hasattr(_PF_MODEL, "to"):
+                    _PF_MODEL.to(target_dev)
+                _PF_MODEL_KIND = f"YOLOE-pf ({YOLOE_PF_WEIGHTS}, 4585 cl.)"
+            except Exception:
+                _PF_MODEL = None
+                _PF_MODEL_KIND = "unavailable"
+        return _PF_MODEL, _PF_MODEL_KIND
 
 
 def _load_moge2_and_segmenter(
@@ -228,9 +258,15 @@ def _load_moge2_and_segmenter(
 
             if _OV_MODEL is None:
                 _OV_MODEL = YOLOE(YOLOE_OV_WEIGHTS)
+                if hasattr(_OV_MODEL, "to"):
+                    _OV_MODEL.to(_LOCAL_DEVICE)
             target_tuple = tuple(target_classes)
             if _OV_CLASSES_CACHE != target_tuple:
-                _OV_MODEL.set_classes(target_classes)
+                if hasattr(_OV_MODEL, "get_text_pe"):
+                    pe = _OV_MODEL.get_text_pe(target_classes)
+                    _OV_MODEL.set_classes(target_classes, pe)
+                else:
+                    _OV_MODEL.set_classes(target_classes)
                 _OV_CLASSES_CACHE = target_tuple
             _SEG_MODEL_KIND = f"YOLOE-OV ({YOLOE_OV_WEIGHTS})"
             return (
@@ -247,6 +283,8 @@ def _load_moge2_and_segmenter(
                 from ultralytics import YOLOE  # type: ignore
 
                 _SEG_MODEL = YOLOE(YOLOE_PF_WEIGHTS)
+                if hasattr(_SEG_MODEL, "to"):
+                    _SEG_MODEL.to(_LOCAL_DEVICE)
                 _SEG_MODEL_KIND = f"YOLOE-pf ({YOLOE_PF_WEIGHTS})"
             except Exception:
                 _SEG_MODEL = YOLO(YOLO_FALLBACK_WEIGHTS)
@@ -825,6 +863,27 @@ def _depth_layered_fallback_objects(
     return results
 
 
+def _load_moge2_only() -> tuple[Any, str, str]:
+    """Thread-safe lazy loader for MoGe-2 ViT-S without triggering open-vocab text encoding."""
+    global _MOGE_MODEL, _LOCAL_DEVICE, _DEVICE_LABEL
+
+    import torch
+    from moge.model.v2 import MoGeModel
+
+    with _MODEL_LOCK:
+        if _MOGE_MODEL is None:
+            if torch.cuda.is_available():
+                _LOCAL_DEVICE = "cuda"
+                _DEVICE_LABEL = torch.cuda.get_device_name(0)
+            else:
+                _LOCAL_DEVICE = "cpu"
+                _DEVICE_LABEL = "CPU"
+
+            _MOGE_MODEL = MoGeModel.from_pretrained(MOGE_MODEL_ID).to(_LOCAL_DEVICE).eval()
+
+        return _MOGE_MODEL, _LOCAL_DEVICE, f"{MOGE_MODEL_ID.split('/')[-1]} ({_DEVICE_LABEL})"
+
+
 def _run_moge2_inference(
     rgb_pil: Image.Image,
     fov_hint_deg: Optional[float] = None,
@@ -832,7 +891,7 @@ def _run_moge2_inference(
     """Run MoGe-2 ViT-S on scaled RGB image and return OpenCV points, depth, valid mask, and FOV."""
     import torch
 
-    model, _, device, device_desc = _load_moge2_and_segmenter()
+    model, device, device_desc = _load_moge2_only()
     w0, h0 = rgb_pil.size
     max_side = 768
     if max(w0, h0) > max_side:
@@ -980,6 +1039,295 @@ def extract_depth_and_point_cloud(
     }
 
 
+_BROAD_PF_SKIP_LABELS = {"glass_floor", "wall", "floor", "ceiling", "sky", "ground"}
+
+
+def _clean_label_slug(raw_name: str, fallback: str) -> str:
+    slug = re.sub(r"\s+", "_", str(raw_name).strip())
+    return slug or fallback
+
+
+def _bbox_iou_xyxy(box_a: list[float], box_b: list[float]) -> float:
+    ax0, ay0, ax1, ay1 = float(box_a[0]), float(box_a[1]), float(box_a[2]), float(box_a[3])
+    bx0, by0, bx1, by1 = float(box_b[0]), float(box_b[1]), float(box_b[2]), float(box_b[3])
+    ix0 = max(ax0, bx0)
+    iy0 = max(ay0, by0)
+    ix1 = min(ax1, bx1)
+    iy1 = min(ay1, by1)
+    iw = max(0.0, ix1 - ix0)
+    ih = max(0.0, iy1 - iy0)
+    inter = iw * ih
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+    union = area_a + area_b - inter
+    return float(inter / union) if union > 1e-6 else 0.0
+
+
+def lift_box2d_to_foreground_mask(
+    points_cv: np.ndarray,
+    valid_mask: np.ndarray,
+    box_2d_norm_1000: list[float],
+    proc_width: int,
+    proc_height: int,
+) -> Optional[np.ndarray]:
+    """Isolate foreground depth cluster inside a normalized 2D `[ymin, xmin, ymax, xmax]` (0..1000) ROI."""
+    if len(box_2d_norm_1000) < 4 or proc_width < 16 or proc_height < 16:
+        return None
+    if points_cv.shape[:2] != (proc_height, proc_width) or valid_mask.shape[:2] != (proc_height, proc_width):
+        return None
+
+    ymin, xmin, ymax, xmax = [float(np.clip(v, 0.0, 1000.0)) for v in box_2d_norm_1000[:4]]
+    if ymin > ymax:
+        ymin, ymax = ymax, ymin
+    if xmin > xmax:
+        xmin, xmax = xmax, xmin
+
+    x0 = int(max(0, math.floor((xmin / 1000.0) * proc_width)))
+    x1 = int(min(proc_width, math.ceil((xmax / 1000.0) * proc_width)))
+    y0 = int(max(0, math.floor((ymin / 1000.0) * proc_height)))
+    y1 = int(min(proc_height, math.ceil((ymax / 1000.0) * proc_height)))
+
+    if (x1 - x0) < 8 or (y1 - y0) < 8:
+        return None
+
+    total_px = float(max(proc_width * proc_height, 1))
+    roi_area_frac = float((x1 - x0) * (y1 - y0)) / total_px
+    if roi_area_frac > 0.92 or roi_area_frac < 0.0015:
+        return None
+
+    pts_roi = points_cv[y0:y1, x0:x1]
+    z_roi = pts_roi[..., 2]
+    val_roi = (
+        valid_mask[y0:y1, x0:x1]
+        & np.isfinite(pts_roi).all(axis=-1)
+        & (z_roi > 0.04)
+        & (z_roi < 45.0)
+    )
+    if int(np.sum(val_roi)) < 16:
+        return None
+
+    fg_pts = _filter_foreground_depth_mode(pts_roi[val_roi])
+    z_fg = fg_pts[:, 2]
+    if z_fg.size < 8:
+        return None
+
+    z_med = float(np.median(z_fg))
+    pad = max(0.04, 0.08 * z_med)
+    z_lo = max(0.04, float(np.percentile(z_fg, 3)) - pad)
+    z_hi = float(np.percentile(z_fg, 97)) + pad
+
+    roi_fg_mask = val_roi & (z_roi >= z_lo) & (z_roi <= z_hi)
+    if int(np.sum(roi_fg_mask)) < 16:
+        return None
+
+    full_mask = np.zeros((proc_height, proc_width), dtype=bool)
+    full_mask[y0:y1, x0:x1] = roi_fg_mask
+    return full_mask
+
+
+def _extract_ultralytics_candidates(
+    seg_results: Any,
+    proc_width: int,
+    proc_height: int,
+    *,
+    source: str,
+    min_area_frac: float = 0.002,
+    max_area_frac: float = 0.88,
+) -> list[dict[str, Any]]:
+    """Normalize Ultralytics instance segmentation predictions into sorted mask candidates."""
+    if not seg_results:
+        return []
+    r0 = seg_results[0]
+    boxes = getattr(r0, "boxes", None)
+    masks = getattr(r0, "masks", None)
+    names = getattr(r0, "names", {}) or {}
+    if boxes is None or len(boxes) == 0:
+        return []
+
+    confs = boxes.conf.detach().cpu().numpy()
+    cls_ids = boxes.cls.detach().cpu().numpy().astype(int)
+    xyxy = boxes.xyxy.detach().cpu().numpy()
+    mask_stack = (
+        masks.data.detach().cpu().numpy()
+        if masks is not None and getattr(masks, "data", None) is not None
+        else None
+    )
+    total_px = float(max(proc_width * proc_height, 1))
+    order = np.argsort(-confs)
+
+    candidates: list[dict[str, Any]] = []
+    for idx_num, i in enumerate(order):
+        bx0, by0, bx1, by1 = [float(v) for v in xyxy[i]]
+        bbox_area_frac = max(0.0, (bx1 - bx0) * (by1 - by0)) / total_px
+        if (len(boxes) > 1 and bbox_area_frac > 0.85) or bbox_area_frac > 0.92:
+            continue
+
+        if mask_stack is not None and i < mask_stack.shape[0]:
+            raw_m = mask_stack[i] > 0.5
+            if raw_m.shape != (proc_height, proc_width):
+                pil_m = Image.fromarray(raw_m.astype(np.uint8) * 255, mode="L").resize(
+                    (proc_width, proc_height), Image.Resampling.NEAREST
+                )
+                bin_mask = np.asarray(pil_m) > 127
+            else:
+                bin_mask = raw_m
+        else:
+            ix0 = int(max(0, round(bx0 + 0.15 * (bx1 - bx0))))
+            ix1 = int(min(proc_width, round(bx1 - 0.15 * (bx1 - bx0))))
+            iy0 = int(max(0, round(by0 + 0.15 * (by1 - by0))))
+            iy1 = int(min(proc_height, round(by1 - 0.15 * (by1 - by0))))
+            bin_mask = np.zeros((proc_height, proc_width), dtype=bool)
+            bin_mask[iy0:iy1, ix0:ix1] = True
+
+        area_frac = float(np.sum(bin_mask)) / total_px
+        if area_frac > max_area_frac or area_frac < min_area_frac:
+            continue
+
+        raw_name = (
+            names.get(int(cls_ids[i]), f"object_{int(cls_ids[i])}")
+            if isinstance(names, dict)
+            else f"object_{int(cls_ids[i])}"
+        )
+        clean_label = _clean_label_slug(str(raw_name), f"obj_{idx_num + 1}")
+        candidates.append(
+            {
+                "label": clean_label,
+                "conf": round(float(confs[i]), 3),
+                "mask": bin_mask,
+                "xyxy": [bx0, by0, bx1, by1],
+                "xyxy_norm": [
+                    round((by0 / max(proc_height, 1)) * 1000.0, 1),
+                    round((bx0 / max(proc_width, 1)) * 1000.0, 1),
+                    round((by1 / max(proc_height, 1)) * 1000.0, 1),
+                    round((bx1 / max(proc_width, 1)) * 1000.0, 1),
+                ],
+                "area_frac": round(area_frac, 4),
+                "source": source,
+            }
+        )
+    return candidates
+
+
+def fuse_discovery_and_segmentation_candidates(
+    *,
+    ov_candidates: list[dict[str, Any]],
+    pf_candidates: list[dict[str, Any]],
+    vlm_objects_2d: list[dict[str, Any]],
+    points_cv: np.ndarray,
+    valid_mask: np.ndarray,
+    proc_width: int,
+    proc_height: int,
+    max_objects: int = 10,
+) -> list[dict[str, Any]]:
+    """Fuse VLM 2D hints, YOLOE-OV masks, and YOLOE-PF discoveries without mask duplicates."""
+    fused: list[dict[str, Any]] = []
+
+    def _overlaps(mask: np.ndarray, threshold: float = 0.45) -> bool:
+        for kept in fused:
+            pm = kept["mask"]
+            inter = float(np.sum(mask & pm))
+            union = float(np.sum(mask | pm))
+            if union > 0.0 and (inter / union) > threshold:
+                return True
+        return False
+
+    def _append_unique(mask: np.ndarray, label: str, conf: float, source: str) -> bool:
+        if len(fused) >= max_objects or _overlaps(mask):
+            return False
+        fused.append(
+            {
+                "mask": mask,
+                "label": _clean_label_slug(label, f"obj_{len(fused) + 1}"),
+                "conf": round(float(conf), 3),
+                "source": source,
+            }
+        )
+        return True
+
+    if vlm_objects_2d:
+        sorted_vlm = sorted(
+            vlm_objects_2d,
+            key=lambda item: float(item.get("confidence", 0.85) or 0.85),
+            reverse=True,
+        )
+        pool: list[tuple[int, str, dict[str, Any]]] = (
+            [(i, "ov", c) for i, c in enumerate(ov_candidates)]
+            + [(1000 + i, "pf", c) for i, c in enumerate(pf_candidates)]
+        )
+        used_pool: set[int] = set()
+
+        for v_obj in sorted_vlm:
+            if len(fused) >= max_objects:
+                break
+            box_2d = v_obj.get("box_2d") or []
+            if len(box_2d) < 4:
+                continue
+            ymin, xmin, ymax, xmax = [float(v) for v in box_2d[:4]]
+            if ymin > ymax:
+                ymin, ymax = ymax, ymin
+            if xmin > xmax:
+                xmin, xmax = xmax, xmin
+            v_xyxy = [
+                (xmin / 1000.0) * proc_width,
+                (ymin / 1000.0) * proc_height,
+                (xmax / 1000.0) * proc_width,
+                (ymax / 1000.0) * proc_height,
+            ]
+            v_label = str(v_obj.get("label") or "object")
+            v_conf = float(v_obj.get("confidence", 0.85) or 0.85)
+
+            best_idx: Optional[int] = None
+            best_cand: Optional[dict[str, Any]] = None
+            best_score = -1.0
+            for p_idx, kind, cand in pool:
+                if p_idx in used_pool:
+                    continue
+                iou = _bbox_iou_xyxy(v_xyxy, cand["xyxy"])
+                if iou >= 0.25:
+                    score = iou + (0.02 if kind == "ov" else 0.0)
+                    if score > best_score:
+                        best_score = score
+                        best_idx = p_idx
+                        best_cand = cand
+
+            if best_idx is not None and best_cand is not None:
+                if _append_unique(best_cand["mask"], v_label, max(v_conf, float(best_cand["conf"])), "vlm_yoloe_fused"):
+                    used_pool.add(best_idx)
+            else:
+                fg_mask = lift_box2d_to_foreground_mask(
+                    points_cv,
+                    valid_mask,
+                    [ymin, xmin, ymax, xmax],
+                    proc_width,
+                    proc_height,
+                )
+                if fg_mask is not None:
+                    _append_unique(fg_mask, v_label, v_conf, "vlm_depth_lifted")
+
+        for i, cand in enumerate(ov_candidates):
+            if i in used_pool:
+                continue
+            _append_unique(cand["mask"], cand["label"], float(cand["conf"]), "yoloe_ov")
+        return fused
+
+    # Local adaptive dual-pass mode: YOLOE-OV prioritized, high-conf YOLOE-PF fills gaps
+    for cand in ov_candidates:
+        _append_unique(cand["mask"], cand["label"], float(cand["conf"]), "yoloe_ov")
+
+    for cand in pf_candidates:
+        if len(fused) >= max_objects:
+            break
+        if float(cand.get("conf", 0.0)) < 0.20:
+            continue
+        if _clean_label_slug(str(cand.get("label", "")), "").lower() in _BROAD_PF_SKIP_LABELS:
+            continue
+        _append_unique(cand["mask"], cand["label"], float(cand["conf"]), "yoloe_pf_4585")
+
+    return fused
+
+
 def run_local_metric_3d(
     image_base64: str,
     *,
@@ -987,18 +1335,14 @@ def run_local_metric_3d(
     auto_fov: bool = True,
     max_objects: int = 10,
     custom_prompt: Optional[str] = None,
+    vlm_discovery: Optional[dict[str, Any]] = None,
+    enable_prompt_free: bool = True,
 ) -> dict[str, Any]:
-    """Full local GPU/CPU RGB -> Metric Depth + YOLOE Instance Masks -> 9-DOF 3D OBBs + Point Cloud."""
+    """Full hybrid/local GPU/CPU RGB -> Metric Depth + Adaptive Discovery/YOLOE -> 9-DOF 3D OBBs + Surfels."""
+    from app.services.scene_intelligence import infer_local_scene_discovery, parse_custom_prompt_classes
+
     t0 = time.perf_counter()
     rgb_pil, w, h, exif_fov_h_deg = extract_exif_image_info(image_base64)
-
-    custom_classes: Optional[list[str]] = None
-    if custom_prompt:
-        parsed = [c.strip() for c in re.split(r"[,;\n]+", custom_prompt) if c.strip()]
-        if parsed:
-            custom_classes = parsed[:15]
-
-    _, seg_model, device, model_desc = _load_moge2_and_segmenter(custom_classes=custom_classes)
     hint = exif_fov_h_deg if auto_fov else fov_override_deg
     moge_out = _run_moge2_inference(rgb_pil, fov_hint_deg=hint)
 
@@ -1013,106 +1357,139 @@ def run_local_metric_3d(
         effective_fov = float(moge_fov)
         fov_source = "moge2_intrinsics"
 
-    # Run Ultralytics YOLOE / YOLO segmentation on a PIL RGB Image (numpy arrays in Ultralytics expect BGR)
+    depth_b64, depth_stats = render_depth_map_png(moge_out["depth_m"], moge_out["valid_mask"])
     rgb_u8 = moge_out["rgb_u8"]
+    pil_proc = Image.fromarray(rgb_u8, mode="RGB")
+    pw = int(moge_out["proc_width"])
+    ph = int(moge_out["proc_height"])
+    user_classes = parse_custom_prompt_classes(custom_prompt)
+
+    pf_candidates: list[dict[str, Any]] = []
+    pf_used_flag = False
+
+    if vlm_discovery is not None:
+        raw_classes = list(vlm_discovery.get("detected_classes") or vlm_discovery.get("active_vocabulary") or [])
+        target_classes: list[str] = []
+        seen_t: set[str] = set()
+        for c in [*user_classes, *raw_classes]:
+            cleaned_c = re.sub(r"\s+", " ", str(c).strip().replace("_", " "))
+            if cleaned_c and cleaned_c.lower() not in seen_t:
+                seen_t.add(cleaned_c.lower())
+                target_classes.append(cleaned_c)
+            if len(target_classes) >= 18:
+                break
+        if not target_classes:
+            target_classes = list(DEFAULT_OPEN_VOCAB_CLASSES)
+        discovery_meta = dict(vlm_discovery)
+        discovery_meta["active_vocabulary"] = target_classes
+        vlm_objects_2d = list(vlm_discovery.get("objects_2d") or [])
+    else:
+        if enable_prompt_free and not user_classes:
+            pf_model, _ = _load_prompt_free_segmenter(device=moge_out["device"])
+            if pf_model is not None:
+                try:
+                    pf_res = pf_model.predict(
+                        source=pil_proc,
+                        device=moge_out["device"],
+                        conf=0.16,
+                        iou=0.55,
+                        max_det=16,
+                        verbose=False,
+                    )
+                    pf_candidates = _extract_ultralytics_candidates(
+                        pf_res, pw, ph, source="yoloe_pf_4585"
+                    )
+                    pf_used_flag = True
+                except Exception:
+                    pf_candidates = []
+
+        discovery_meta = infer_local_scene_discovery(
+            pf_candidates,
+            depth_stats=depth_stats,
+            custom_prompt=custom_prompt,
+            default_classes=DEFAULT_OPEN_VOCAB_CLASSES,
+        )
+        target_classes = list(discovery_meta["active_vocabulary"])
+        vlm_objects_2d = []
+
+    _, seg_model, device, model_desc = _load_moge2_and_segmenter(custom_classes=target_classes)
+    if pf_used_flag:
+        model_desc = f"{model_desc} + YOLOE-pf (4585 cl.)"
+
     seg_results = seg_model.predict(
-        source=Image.fromarray(rgb_u8, mode="RGB"),
+        source=pil_proc,
         device=device,
         conf=0.11,
         iou=0.55,
         max_det=max(max_objects * 2, 16),
         verbose=False,
     )
+    ov_candidates = _extract_ultralytics_candidates(seg_results, pw, ph, source="yoloe_ov")
+
+    if vlm_discovery is not None and not ov_candidates and enable_prompt_free and not pf_candidates:
+        pf_model, _ = _load_prompt_free_segmenter(device=device)
+        if pf_model is not None:
+            try:
+                pf_res = pf_model.predict(
+                    source=pil_proc,
+                    device=device,
+                    conf=0.16,
+                    iou=0.55,
+                    max_det=16,
+                    verbose=False,
+                )
+                pf_candidates = _extract_ultralytics_candidates(
+                    pf_res, pw, ph, source="yoloe_pf_4585"
+                )
+            except Exception:
+                pf_candidates = []
+
+    fused_candidates = fuse_discovery_and_segmentation_candidates(
+        ov_candidates=ov_candidates,
+        pf_candidates=pf_candidates,
+        vlm_objects_2d=vlm_objects_2d,
+        points_cv=moge_out["points_cv"],
+        valid_mask=moge_out["valid_mask"],
+        proc_width=pw,
+        proc_height=ph,
+        max_objects=max_objects,
+    )
 
     lifted_objects: list[dict[str, Any]] = []
     kept_masks_proc: list[np.ndarray] = []
-    if seg_results:
-        r0 = seg_results[0]
-        boxes = r0.boxes
-        masks = r0.masks
-        names = getattr(r0, "names", {}) or {}
-        if boxes is not None and len(boxes) > 0:
-            confs = boxes.conf.detach().cpu().numpy()
-            cls_ids = boxes.cls.detach().cpu().numpy().astype(int)
-            xyxy = boxes.xyxy.detach().cpu().numpy()
-            mask_stack = (
-                masks.data.detach().cpu().numpy()
-                if masks is not None and getattr(masks, "data", None) is not None
-                else None
-            )
-            pw = moge_out["proc_width"]
-            ph = moge_out["proc_height"]
-            total_px = float(max(pw * ph, 1))
+    sources_used: list[str] = []
+    vlm_guided_count = 0
 
-            order = np.argsort(-confs)
-            for idx_num, i in enumerate(order):
-                if len(lifted_objects) >= max_objects:
-                    break
-                if mask_stack is not None and i < mask_stack.shape[0]:
-                    raw_m = mask_stack[i] > 0.5
-                    if raw_m.shape != (ph, pw):
-                        pil_m = Image.fromarray(raw_m.astype(np.uint8) * 255, mode="L").resize(
-                            (pw, ph), Image.Resampling.NEAREST
-                        )
-                        bin_mask = np.asarray(pil_m) > 127
-                    else:
-                        bin_mask = raw_m
-                else:
-                    x0, y0, x1, y1 = xyxy[i]
-                    ix0 = int(max(0, round(x0 + 0.15 * (x1 - x0))))
-                    ix1 = int(min(pw, round(x1 - 0.15 * (x1 - x0))))
-                    iy0 = int(max(0, round(y0 + 0.15 * (y1 - y0))))
-                    iy1 = int(min(ph, round(y1 - 0.15 * (y1 - y0))))
-                    bin_mask = np.zeros((ph, pw), dtype=bool)
-                    bin_mask[iy0:iy1, ix0:ix1] = True
+    for cand in fused_candidates:
+        if len(lifted_objects) >= max_objects:
+            break
+        clean_label = str(cand["label"])
+        bin_mask = cand["mask"]
+        box_3d = lift_mask_to_gemini_obb(
+            moge_out["points_cv"],
+            bin_mask,
+            moge_out["valid_mask"],
+            rgb_u8=rgb_u8,
+            label=clean_label,
+        )
+        if box_3d is None:
+            continue
 
-                # Skip composite frame-spanning bboxes when sub-objects exist
-                bx0, by0, bx1, by1 = xyxy[i]
-                bbox_area_frac = max(0.0, float(bx1 - bx0) * float(by1 - by0)) / total_px
-                if (len(boxes) > 1 and bbox_area_frac > 0.85) or bbox_area_frac > 0.92:
-                    continue
+        src_tag = str(cand.get("source", "yoloe_ov"))
+        if src_tag not in sources_used:
+            sources_used.append(src_tag)
+        if src_tag.startswith("vlm_"):
+            vlm_guided_count += 1
 
-                # Skip background-spanning masks (>88% frame) & near-duplicate mask overlaps (IoU > 0.45)
-                area_frac = float(np.sum(bin_mask)) / total_px
-                if area_frac > 0.88 or area_frac < 0.002:
-                    continue
-
-                is_dup = False
-                for prev_m in kept_masks_proc:
-                    inter = float(np.sum(bin_mask & prev_m))
-                    union = float(np.sum(bin_mask | prev_m))
-                    if union > 0.0 and (inter / union) > 0.45:
-                        is_dup = True
-                        break
-                if is_dup:
-                    continue
-
-                raw_name = (
-                    names.get(int(cls_ids[i]), f"object_{int(cls_ids[i])}")
-                    if isinstance(names, dict)
-                    else f"object_{int(cls_ids[i])}"
-                )
-                clean_label = str(raw_name).strip().replace(" ", "_") or f"obj_{idx_num + 1}"
-
-                box_3d = lift_mask_to_gemini_obb(
-                    moge_out["points_cv"],
-                    bin_mask,
-                    moge_out["valid_mask"],
-                    rgb_u8=rgb_u8,
-                    label=clean_label,
-                )
-                if box_3d is None:
-                    continue
-
-                kept_masks_proc.append(bin_mask)
-                lifted_objects.append(
-                    {
-                        "id": f"moge_{len(lifted_objects) + 1}",
-                        "label": clean_label,
-                        "box_3d": box_3d,
-                        "confidence": round(float(confs[i]), 3),
-                    }
-                )
+        kept_masks_proc.append(bin_mask)
+        lifted_objects.append(
+            {
+                "id": f"moge_{len(lifted_objects) + 1}",
+                "label": clean_label,
+                "box_3d": box_3d,
+                "confidence": round(float(cand["conf"]), 3),
+            }
+        )
 
     if not lifted_objects:
         lifted_objects = _depth_layered_fallback_objects(
@@ -1121,6 +1498,11 @@ def run_local_metric_3d(
             moge_out["valid_mask"],
             max_objects=min(max_objects, 4),
         )
+        if lifted_objects:
+            sources_used.append("depth_layer_fallback")
+
+    discovery_meta["vlm_guided_count"] = vlm_guided_count
+    discovery_meta["detection_sources"] = sources_used
 
     spec_mask, _ = compute_specular_mask(rgb_u8)
     ransac_plane = fit_ransac_dominant_plane(
@@ -1149,7 +1531,6 @@ def run_local_metric_3d(
                 )
             )
 
-    depth_b64, depth_stats = render_depth_map_png(moge_out["depth_m"], moge_out["valid_mask"])
     point_cloud = pack_point_cloud_threejs(
         moge_out["points_cv"],
         rgb_u8,
@@ -1185,7 +1566,12 @@ def run_local_metric_3d(
     rgb_pil.save(oriented_buf, format="PNG")
     oriented_b64 = base64.b64encode(oriented_buf.getvalue()).decode("ascii")
 
-    mode_name = "moge2_yoloe_gpu" if device.startswith("cuda") else "moge2_yoloe_cpu"
+    if vlm_discovery is not None:
+        mode_name = "hybrid_vlm_moge2_gpu" if device.startswith("cuda") else "hybrid_vlm_moge2_cpu"
+    else:
+        mode_name = "moge2_yoloe_gpu" if device.startswith("cuda") else "moge2_yoloe_cpu"
+
+    domain_es = str(discovery_meta.get("domain_label_es") or "Inspección Física General")
     return {
         "mode": mode_name,
         "model_desc": model_desc,
@@ -1198,8 +1584,9 @@ def run_local_metric_3d(
         "exif_fov_h_deg": exif_fov_h_deg,
         "estimated_moge_fov_h_deg": moge_fov,
         "objects": lifted_objects,
+        "discovery_meta": discovery_meta,
         "scene_summary": (
-            f"Reconstrucción métrica local ({model_desc}): {len(lifted_objects)} objetos en rango "
+            f"Reconstrucción métrica ({model_desc} · {domain_es}): {len(lifted_objects)} objetos en rango "
             f"{depth_stats['min_m']:.2f} m – {depth_stats['max_m']:.2f} m "
             f"(mediana {depth_stats['median_m']:.2f} m, FOV_h={effective_fov:.1f}° vía {fov_source})."
         ),

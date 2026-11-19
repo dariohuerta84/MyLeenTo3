@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import type {
+  AnalyzeEngine,
   BenchmarkScene,
   CameraViewMode,
   DepthStats,
@@ -22,13 +23,16 @@ import type {
   MeasurementState,
   OcclusionEntry,
   PointCloudData,
+  RealPhotoMetrics,
   SceneAction,
+  SceneIntelligence,
   SceneMetrics,
   SpatialObject,
   ThinkingLevel,
 } from '../types/spatial';
 import { PinholeOverlay2D } from './PinholeOverlay2D';
 import { Scene3DViewport } from './Scene3DViewport';
+import { SceneIntelligencePanel } from './SceneIntelligencePanel';
 import { SpatialCopilotPanel } from './SpatialCopilotPanel';
 import { formatDegrees, formatMeters, formatPercent } from '../utils/geometry';
 
@@ -43,6 +47,8 @@ interface LabWorkspaceProps {
   fovHDeg: number;
   thinkingLevel: ThinkingLevel;
   selectedModel: GeminiModelId;
+  selectedEngine: AnalyzeEngine;
+  customPrompt: string;
   unfoldProgress: number;
   showGroundTruth: boolean;
   showOcclusionRays: boolean;
@@ -56,6 +62,8 @@ interface LabWorkspaceProps {
   occlusionMatrix: OcclusionEntry[];
   metrics?: SceneMetrics | null;
   intrinsicDiagnostics?: IntrinsicDiagnostics | null;
+  realPhotoMetrics?: RealPhotoMetrics | null;
+  sceneIntelligence?: SceneIntelligence | null;
   pointCloud?: PointCloudData | null;
   depthMapBase64?: string | null;
   depthStats?: DepthStats | null;
@@ -75,6 +83,8 @@ interface LabWorkspaceProps {
   onUploadFile: (file: File) => void;
   onChangeFovH: (fov: number) => void;
   onChangeThinkingLevel: (level: ThinkingLevel) => void;
+  onChangeEngine: (engine: AnalyzeEngine) => void;
+  onChangeCustomPrompt: (val: string) => void;
   onChangeUnfoldProgress: (val: number) => void;
   onToggleGroundTruth: () => void;
   onToggleOcclusionRays: () => void;
@@ -100,6 +110,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   fovHDeg,
   thinkingLevel,
   selectedModel,
+  selectedEngine,
+  customPrompt,
   unfoldProgress,
   showGroundTruth,
   showOcclusionRays,
@@ -113,6 +125,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   occlusionMatrix,
   metrics,
   intrinsicDiagnostics,
+  realPhotoMetrics,
+  sceneIntelligence,
   pointCloud,
   depthMapBase64,
   depthStats,
@@ -132,6 +146,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   onUploadFile,
   onChangeFovH,
   onChangeThinkingLevel,
+  onChangeEngine,
+  onChangeCustomPrompt,
   onChangeUnfoldProgress,
   onToggleGroundTruth,
   onToggleOcclusionRays,
@@ -423,6 +439,61 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
           </div>
         </div>
 
+        {/* Hybrid Engine & Dynamic Open-Vocabulary Bar */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-3 border-t border-[#E2E5EA] pt-2.5">
+          <div className="flex items-center gap-2">
+            <label htmlFor="engine-select" className="text-xs font-medium text-[#4B5563]">
+              Motor
+            </label>
+            <select
+              id="engine-select"
+              value={selectedEngine}
+              onChange={(e) => onChangeEngine(e.target.value as AnalyzeEngine)}
+              className="font-mono-tech rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] px-2.5 py-1.5 text-xs font-medium text-[#111827] focus:border-[#1D4ED8] focus:outline-none"
+            >
+              <option value="auto">Auto (Híbrido VLM + 3D)</option>
+              <option value="hybrid_vlm_3d">Híbrido VLM → YOLOE → MoGe-2</option>
+              <option value="moge2_local">Local GPU (YOLOE-PF + MoGe-2)</option>
+              <option value="gemini_live">Solo Gemini 3D Live</option>
+            </select>
+          </div>
+
+          <div className="flex min-w-[260px] flex-1 items-center gap-2">
+            <label
+              htmlFor="custom-vocab-input"
+              className="whitespace-nowrap text-xs font-medium text-[#4B5563]"
+            >
+              Vocabulario / Enfoque
+            </label>
+            <div className="relative flex flex-1 items-center">
+              <input
+                id="custom-vocab-input"
+                type="text"
+                value={customPrompt}
+                onChange={(e) => onChangeCustomPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    onAnalyzeScene();
+                  }
+                }}
+                placeholder="ej. electrical switch, wire, human hand (Enter para re-detectar)"
+                className="font-mono-tech w-full rounded-lg border border-[#E2E5EA] bg-[#F7F7F5] px-2.5 py-1.5 pr-7 text-xs text-[#111827] placeholder:text-[#9CA3AF] focus:border-[#1D4ED8] focus:bg-[#FFFFFF] focus:outline-none"
+              />
+              {customPrompt && (
+                <button
+                  type="button"
+                  onClick={() => onChangeCustomPrompt('')}
+                  aria-label="Limpiar vocabulario personalizado"
+                  className="absolute right-2 rounded p-0.5 text-[#4B5563] hover:text-[#111827]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Optional notice / error / active subset banner */}
         {(notice || error || highlightedIds) && (
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-[#E2E5EA] pt-2.5 text-xs">
@@ -590,6 +661,9 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
         </div>
       </div>
 
+      {/* Domain-Adaptive 3D-Grounded Diagnosis & Discovery Panel */}
+      <SceneIntelligencePanel intelligence={sceneIntelligence} />
+
       {/* Bottom Split: Selected Pose & Object Telemetry + Spatial Copilot */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* Compact Object Inspector & List */}
@@ -714,6 +788,8 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
             height={height}
             fovHDeg={fovHDeg}
             selectedModel={selectedModel}
+            realPhotoMetrics={realPhotoMetrics}
+            sceneIntelligence={sceneIntelligence}
             apiKey={apiKey}
             onExecuteSceneActions={onExecuteSceneActions}
           />

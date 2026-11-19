@@ -1,4 +1,5 @@
 import type {
+  AnalyzeEngine,
   AnalyzeResponse,
   BenchmarkScene,
   CompareModelsResponse,
@@ -9,7 +10,9 @@ import type {
   MultiFrameDemoResponse,
   MultiFrameItem,
   PairwiseGeometry,
+  RealPhotoMetrics,
   ReprojectResponse,
+  SceneIntelligence,
   SpatialObject,
   ThinkingLevel,
 } from '../types/spatial';
@@ -69,8 +72,9 @@ export interface AnalyzePayload {
   max_objects?: number;
   custom_prompt?: string;
   force_demo?: boolean;
-  engine?: 'auto' | 'moge2_local' | 'gemini_live' | 'salience_fallback';
+  engine?: AnalyzeEngine;
   auto_fov?: boolean;
+  enable_diagnosis?: boolean;
 }
 
 export async function analyzeScene(
@@ -187,6 +191,8 @@ export interface CopilotPayload {
   fov_h_deg: number;
   model: GeminiModelId;
   previous_interaction_id?: string | null;
+  real_photo_metrics?: RealPhotoMetrics | null;
+  scene_intelligence?: SceneIntelligence | null;
 }
 
 export async function sendCopilotMessage(

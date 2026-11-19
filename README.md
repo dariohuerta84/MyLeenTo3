@@ -8,7 +8,7 @@
 ![React 19 + Three.js](https://img.shields.io/badge/Frontend-React_19_+_Three.js-1D4ED8?style=for-the-badge&logo=threedotjs&logoColor=white)
 ![Google AI Studio v1](https://img.shields.io/badge/Gemini-Interactions_API_v1-0F766E?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![MoGe-2 + YOLOE GPU](https://img.shields.io/badge/3D_Local-MoGe--2_%2B_YOLOE_GPU-1D4ED8?style=for-the-badge)
-![Pytest 53/53](https://img.shields.io/badge/Pytest-53%2F53_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
+![Pytest 60/60](https://img.shields.io/badge/Pytest-60%2F60_Passed-111827?style=for-the-badge&logo=pytest&logoColor=white)
 ![SEED 42](https://img.shields.io/badge/Reproducibility-SEED_%3D_42-B45309?style=for-the-badge)
 [![Predecesor 2D](https://img.shields.io/badge/Evolución_de-C8286_Visión_2D-4B5563?style=for-the-badge&logo=github)](https://github.com/dariohuerta84/C8286-Proyecto1-Vision-Clasica-vs-CNN)
 
@@ -114,7 +114,7 @@ flowchart LR
         UI["Landing Scroll IZQ↔DER + Toolbar + Compuerta C8286"]
         V2D["PinholeOverlay2D (2D + Shift-Click)"]
         V3D["Scene3DViewport (WebGL métrico 1u = 1m)"]
-        COP["SpatialCopilotPanel (7 Funciones + Scene Actions)"]
+        COP["SpatialCopilotPanel (8 Funciones + Scene Actions)"]
     end
 
     subgraph Backend["Backend FastAPI (Python 3.12)"]
@@ -123,7 +123,8 @@ flowchart LR
         MTR["core/metrics.py (NDS, Omni3D Depth Bins, mIoU, AP, ATE/AOE)"]
         DIA["core/intrinsic_diagnostics.py (PECS, PVI, GFI, SDAS, Optica)"]
         RPM["core/real_photo_metrics.py (NDC, Manhattan, RANSAC, DBE, Area)"]
-        L3D["services/local_metric_3d.py (EXIF 35mm + MoGe-2 Normals + YOLOE)"]
+        L3D["services/local_metric_3d.py (EXIF 35mm + MoGe-2 + YOLOE-PF/OV)"]
+        SINT["services/scene_intelligence.py (VLM / PF Discovery + Diagnóstico 3D)"]
         SVC["services/gemini_vision.py & spatial_agent.py"]
     end
 
@@ -139,6 +140,7 @@ flowchart LR
     API --> DIA
     API --> RPM
     API --> L3D
+    API --> SINT
     API --> SVC
     SVC <-->|Opcional con API Key| INT
 ```
@@ -155,23 +157,24 @@ flowchart LR
 4. **Métricas Exactas, NDS y Omni3D:** $\text{IoU}_{\text{BEV}}$ vía Sutherland-Hodgman, $\text{IoU}_{\text{3D}}$ vía filtro SAT de 15 ejes + muestreo estratificado determinista (`SEED=42`), asignación óptima Húngara, Bootstrap 95% ($N_{\text{boot}}=1000$), matriz de oclusión Kay-Kajiya sobre 9 objetivos por OBB trasera, puntaje estático **`nds_static`** (*nuScenes*) y desglose **Omni3D** por rangos de profundidad (`near_0_2m`, `mid_2_3.5m`, `far_3.5m_plus`).
 5. **Compuerta Sin Referencia (`cascade_policy`):** integra coherencia de gradientes Sobel (`PECS`), colisiones sólidas (`PVI`), levitación sobre plano soporte (`GFI`), acoplamiento escala–profundidad (`SDAS`), truncamiento (`FBR`) e incertidumbre cuadrática ($\pm\sigma_y$) para dictaminar `APROBADO`, `ESCALAR_MODELO` o `RECHAZADO_FISICA`.
 6. **Metrología de Foto Real y Estándar Clínico/Industrial (`real_photo_metrics.py`, `local_metric_3d.py` & `NDS`):** integra supresión de reflejos especulares (*Harvard Medical School / BWH*), filtrado modal frontal contra sangrado de fondo (*OVMono3D / MoGe-2*), ajuste ortogonal en **L** en BEV + anclaje de cara frontal (*NVIDIA FoundationPose / Geo6DPose*), contorno oclusivo multi-umbral $t \in [5, 25]\%$ con *Silhouette Recall* (*Apple Depth Pro*), consistencia de espacio libre (*PhySIC*), relieve topográfico y volumen sobre el plano **RANSAC** (*Odense NCT02423850*), `GFI` acoplado al plano real (`vertical_wall` / `horizontal_support`), escalado canónico por $\text{FOV}_h$ (*Metric3D v2*), grafo espacial **3D Scene Graph** (*SpatialRGPT / Thinking in Space*) y guía **Next-Best-View** (*CAI4CAI / ActivePose*).
+7. **Inteligencia de Escena Híbrida y Diagnóstico 3D Adaptativo (`scene_intelligence.py`):** conecta comprensión semántica por imagen (`Gemini VLM` o descubrimiento autónomo local con `YOLOE-pf 4,585 cl.`) con detección abierta `YOLOE-OV` (`get_text_pe`) + elevación modal frontal `MoGe-2`, auditoría contra *priors* físicos de tamaño real y un **Diagnóstico LLM/Determinista fundado en telemetría 3D** con 8 herramientas del Copiloto Espacial.
 
 </details>
 
 <details>
-<summary><strong>🔌 Endpoints REST (/api/*) y 7 Herramientas del Copiloto</strong></summary>
+<summary><strong>🔌 Endpoints REST (/api/*) y 8 Herramientas del Copiloto</strong></summary>
 
 | Método | Ruta | Descripción |
 | :--- | :--- | :--- |
 | `GET` | `/api/health` | Estado del servicio, modelos soportados y versión de `google-genai`. |
 | `GET` | `/api/benchmarks` | Catálogo de las 3 escenas calibradas (`SEED=42`) con *Ground Truth*. |
-| `POST` | `/api/analyze` | Percepción 3D (live o fallback por saliencia), proyección 2D, oclusiones, diagnósticos y `cascade_policy`. |
+| `POST` | `/api/analyze` | Percepción 3D híbrida (`Híbrido VLM → YOLOE-OV → MoGe-2` o local `YOLOE-PF 4585 → YOLOE-OV → MoGe-2`), surfels 2DGS, `cascade_policy` y diagnóstico `scene_intelligence`. |
 | `POST` | `/api/reproject` | Recálculo instantáneo ($< 10\text{ ms}$) al variar $\text{FOV}_h$ sin gastar tokens. |
 | `POST` | `/api/measure` | Distancia euclidiana, holgura mínima superficie-a-superficie, colisión SAT e IoU entre 2 objetos. |
 | `POST` | `/api/compare-models` | Comparativa reproducible entre `gemini-4-hydrogen`, `gemini-4-argon` y `gemini-3.5-flash-lite`. |
 | `GET` | `/api/multiframe-demo` | Secuencia demostrativa de 4 cuadros (*World-Model Audit*). |
 | `POST` | `/api/multiframe-audit` | Auditoría temporal de deriva de volumen y oscilación de giro sobre cuadros arbitrarios. |
-| `POST` | `/api/copilot` | Copiloto multi-turno con 7 herramientas: `focus_object`, `measure_distance`, `set_camera_view`, `analyze_occlusions_and_collisions`, `filter_objects`, `run_fov_sensitivity_sweep` y `evaluate_escalation_policy`. |
+| `POST` | `/api/copilot` | Copiloto multi-turno con 8 herramientas: `focus_object`, `measure_distance`, `set_camera_view`, `analyze_occlusions_and_collisions`, `filter_objects`, `run_fov_sensitivity_sweep`, `evaluate_escalation_policy` y `generate_domain_diagnosis`. |
 
 </details>
 
@@ -192,7 +195,7 @@ Levanta automáticamente FastAPI en **`http://127.0.0.1:8085`** y React/Vite en 
 # 1. Opcional: dependencias PyTorch CUDA + MoGe-2 + YOLOE para reconstrucción métrica local GPU
 uv pip install --python backend/.venv/bin/python -r backend/requirements-local-3d.txt
 
-# 2. Suite completa de 53 pruebas deterministas offline (geometría, metrología 3D clínica/industrial, surfels 2DGS, API y compuerta)
+# 2. Suite completa de 60 pruebas deterministas offline (descubrimiento híbrido, metrología 3D, surfels 2DGS, API y compuerta)
 MYLEENTO3_LOCAL_3D_ENGINE=0 backend/.venv/bin/pytest -v
 
 # 2. Pruebas en vivo HTTP de los 3 modelos + 3 fotos diversas (requiere servidor en :8085)
