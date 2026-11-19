@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Compass,
   Film,
+  Orbit,
 } from 'lucide-react';
 import type { AppSection, BenchmarkScene, SpatialObject } from '../types/spatial';
 import { normalizeBase64Image } from '../utils/geometry';
@@ -234,13 +235,13 @@ const ScrollDrivenCuboid: React.FC<{
         <mesh>
           <boxGeometry args={box.size} />
           <meshStandardMaterial
-            color="#1D4ED8"
+            color="#3B82F6"
             transparent
-            opacity={0.14}
+            opacity={0.18}
             roughness={0.5}
             depthWrite={false}
           />
-          <Edges color="#1D4ED8" threshold={15} lineWidth={1.6} />
+          <Edges color="#60A5FA" threshold={15} lineWidth={1.7} />
         </mesh>
       </group>
 
@@ -248,7 +249,7 @@ const ScrollDrivenCuboid: React.FC<{
         <mesh>
           <boxGeometry args={box.size} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-          <Edges color="#0F766E" threshold={15} lineWidth={1.5} />
+          <Edges color="#14B8A6" threshold={15} lineWidth={1.6} />
         </mesh>
       </group>
     </>
@@ -362,12 +363,12 @@ const ScrollRigAndOverlays: React.FC<{
 
   return (
     <group>
-      <gridHelper args={[14, 14, '#94A3B8', '#CBD5E1']} position={[0, -0.52, -3.5]} />
+      <gridHelper args={[14, 14, '#3B5278', '#243654']} position={[0, -0.52, -3.5]} />
       {ringPoints.map(({ r, pts }) => (
         <Line
           key={`ring-${r}`}
           points={pts}
-          color="#94A3B8"
+          color="#475569"
           lineWidth={1}
           dashed
           dashSize={0.14}
@@ -380,13 +381,13 @@ const ScrollRigAndOverlays: React.FC<{
       <group ref={frustumOriginRef}>
         <mesh position={[0, 0, 0]}>
           <sphereGeometry args={[0.04, 16, 16]} />
-          <meshStandardMaterial color="#111827" roughness={0.4} />
+          <meshStandardMaterial color="#F8FAFC" roughness={0.4} />
         </mesh>
         {frustumCorners.map((c, idx) => (
           <Line
             key={`fr-${idx}`}
             points={[[0, 0, 0], c]}
-            color="#64748B"
+            color="#94A3B8"
             lineWidth={1}
             transparent
             opacity={0.65}
@@ -396,25 +397,25 @@ const ScrollRigAndOverlays: React.FC<{
 
       <Line
         points={[...frustumCorners, frustumCorners[0]]}
-        color="#1D4ED8"
+        color="#60A5FA"
         lineWidth={1.5}
         transparent
-        opacity={0.75}
+        opacity={0.85}
       />
 
       <group ref={rulerGroupRef}>
-        <Line points={[boxA.pos, boxB.pos]} color="#BE123C" lineWidth={2.5} />
+        <Line points={[boxA.pos, boxB.pos]} color="#F43F5E" lineWidth={2.5} />
         <mesh position={boxA.pos}>
           <sphereGeometry args={[0.032, 12, 12]} />
-          <meshBasicMaterial color="#BE123C" />
+          <meshBasicMaterial color="#F43F5E" />
         </mesh>
         <mesh position={boxB.pos}>
           <sphereGeometry args={[0.032, 12, 12]} />
-          <meshBasicMaterial color="#BE123C" />
+          <meshBasicMaterial color="#F43F5E" />
         </mesh>
         <Line
           points={[[0, 0, 0], boxB.pos, boxFar.pos]}
-          color="#B45309"
+          color="#F59E0B"
           lineWidth={1.5}
           dashed
           dashSize={0.08}
@@ -658,136 +659,153 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
 
       <div className="relative z-10">
         {/* 1. Architectural Editorial Hero */}
-        <section className="parallax-hero-scope mx-auto max-w-[1360px] px-4 pb-16 pt-8 sm:px-6 lg:pt-12">
-          {/* Unboxed Architectural Masthead Hairline */}
-          <div className="border-b border-[#111827]/15 pb-3">
-            <div className="font-mono-tech flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.14em] text-[#4B5563]">
-              <span>C8286 Edge 2D → MyLeenTo3 Óptica 3D</span>
-              <span>MoGe-2 GPU · Google AI Studio · Sin LiDAR</span>
-            </div>
-          </div>
-
-          <div className="mt-10 grid items-center gap-12 lg:grid-cols-12">
-            <div className="lg:col-span-6 space-y-6">
-              <h1 className="font-serif-editorial text-4xl font-medium leading-[1.06] text-[#111827] sm:text-5xl lg:text-[3.75rem]">
-                Convierte una foto 2D en geometría 3D auditable y sin LiDAR
-              </h1>
-
-              <p className="max-w-[56ch] text-base leading-relaxed text-[#4B5563]">
-                <strong className="font-semibold text-[#111827]">MyLeenTo3</strong> combina reconstrucción métrica densa en GPU (<span className="font-mono-tech text-xs text-[#111827]">EXIF + MoGe-2 + YOLOE</span>), poses 9-DOF en <strong className="font-semibold text-[#111827]">Google AI Studio</strong> y una compuerta determinista en Python que bloquea colisiones y levitaciones físicas antes de decidir.
-              </p>
-
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => onOpenLab(featured?.id)}
-                  className="inline-flex items-center gap-2 rounded-sm bg-[#111827] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
-                >
-                  <span>Abrir Laboratorio 3D</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-                <a
-                  href="#problematica-scroll"
-                  className="inline-flex items-center gap-2 rounded-sm border border-[#111827]/20 bg-[#FFFFFF]/75 px-4 py-2.5 text-sm font-medium text-[#111827] transition-colors hover:border-[#111827]"
-                >
-                  <span>Explorar Problemática</span>
-                  <ArrowDown className="h-4 w-4 text-[#4B5563]" />
-                </a>
-                <button
-                  type="button"
-                  onClick={() => onNavigate('multiframe')}
-                  className="inline-flex items-center gap-2 rounded-sm border border-[#111827]/20 bg-[#FFFFFF]/75 px-4 py-2.5 text-sm font-medium text-[#111827] transition-colors hover:border-[#111827]"
-                >
-                  <Film className="h-4 w-4 text-[#4B5563]" />
-                  <span>Multi-Frame</span>
-                </button>
+        <section className="parallax-hero-scope bg-[radial-gradient(ellipse_at_84%_14%,rgba(29,78,216,0.09),transparent_52%),radial-gradient(ellipse_at_12%_86%,rgba(15,118,110,0.08),transparent_48%),linear-gradient(180deg,rgba(250,248,244,0.88)_0%,rgba(242,245,250,0.82)_100%)] pb-16 pt-6">
+          <div className="mx-auto max-w-[1360px] px-4 sm:px-6 lg:pt-4">
+            <div className="h-[2px] w-full bg-gradient-to-r from-[#1D4ED8] via-[#0F766E] to-[#B45309]" />
+            {/* Unboxed Architectural Masthead Hairline */}
+            <div className="mt-3 border-b border-[#15284B]/18 pb-3">
+              <div className="font-mono-tech flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-[0.14em] text-[#4B5563]">
+                <span className="text-[#15284B] font-semibold">C8286 Edge 2D → MyLeenTo3 Óptica 3D</span>
+                <span>MoGe-2 GPU · Google AI Studio · Sin LiDAR</span>
               </div>
-
-              {/* Unboxed Typographic Metrics Ledger */}
-              <dl className="grid max-w-lg grid-cols-3 border-t border-[#111827]/15 pt-5">
-                <div className="pr-4">
-                  <dt className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
-                    Precisión 3D
-                  </dt>
-                  <dd className="font-mono-tech mt-1 text-lg font-semibold text-[#1D4ED8]">
-                    69.9% mIoU
-                  </dd>
-                </div>
-                <div className="border-l border-[#111827]/15 px-4">
-                  <dt className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
-                    Error Traslación
-                  </dt>
-                  <dd className="font-mono-tech mt-1 text-lg font-semibold text-[#0F766E]">
-                    4.6 cm ATE
-                  </dd>
-                </div>
-                <div className="border-l border-[#111827]/15 pl-4">
-                  <dt className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
-                    Cálculo GPU / FOV
-                  </dt>
-                  <dd className="font-mono-tech mt-1 text-lg font-semibold text-[#111827]">
-                    365 ms
-                  </dd>
-                </div>
-              </dl>
             </div>
 
-            {/* Right Architectural Specimen Plate with Parallax Shift */}
-            <div className="relative lg:col-span-6">
-              <div
-                className="parallax-layer relative border border-[#111827]/18 bg-[#FFFFFF]/82 p-4 backdrop-blur-[2px]"
-                style={{ '--parallax-y': '-20px' } as React.CSSProperties}
-              >
-                <div className="mb-3 flex items-center justify-between border-b border-[#111827]/12 pb-2.5 text-xs">
-                  <span className="font-mono-tech uppercase tracking-wider text-[#111827]">
-                    Lámina I — Banco Óptico Calibrado 9-DOF
-                  </span>
-                  <span className="font-mono-tech text-[11px] text-[#4B5563]">
-                    FOV_h 60.0° · 960×640
-                  </span>
-                </div>
+            <div className="mt-10 grid items-center gap-12 lg:grid-cols-12">
+              <div className="lg:col-span-6 space-y-6">
+                <h1 className="font-serif-editorial text-4xl font-medium leading-[1.06] text-[#111827] sm:text-5xl lg:text-[3.75rem]">
+                  Convierte una foto 2D en{' '}
+                  <span className="text-[#15284B] underline decoration-[#B45309]/55 decoration-2 underline-offset-4">
+                    geometría 3D auditable
+                  </span>{' '}
+                  y sin LiDAR
+                </h1>
 
-                {featured?.image_base64 ? (
-                  <div className="relative overflow-hidden border border-[#111827]/12 bg-[#FFFFFF]">
-                    <img
-                      src={normalizeBase64Image(featured.image_base64)}
-                      alt={featured.title}
-                      className="block h-auto w-full object-cover"
-                    />
-                    <svg
-                      viewBox="0 0 960 640"
-                      className="pointer-events-none absolute inset-0 h-full w-full"
-                      aria-hidden="true"
-                    >
-                      <line x1="480" y1="0" x2="480" y2="640" stroke="#1D4ED8" strokeOpacity="0.28" strokeDasharray="6 6" />
-                      <line x1="0" y1="320" x2="960" y2="320" stroke="#1D4ED8" strokeOpacity="0.28" strokeDasharray="6 6" />
-                      <circle cx="480" cy="320" r="14" fill="none" stroke="#1D4ED8" strokeWidth="1.5" strokeOpacity="0.7" />
-                      <rect x="20" y="20" width="248" height="30" fill="#FFFFFF" fillOpacity="0.94" stroke="#111827" strokeOpacity="0.2" />
-                      <text x="34" y="39" fontFamily="JetBrains Mono, monospace" fontSize="12.5" fill="#111827">
-                        K: f=831.4px · det(M) = +1.0
-                      </text>
-                    </svg>
-                  </div>
-                ) : (
-                  <div className="flex aspect-[3/2] items-center justify-center border border-dashed border-[#111827]/20 bg-[#F7F7F5]/60 p-6 text-center">
-                    <p className="font-mono-tech text-xs text-[#4B5563]">
-                      Cargando escena calibrada desde /api/benchmarks…
-                    </p>
-                  </div>
-                )}
+                <p className="max-w-[56ch] text-base leading-relaxed text-[#4B5563]">
+                  <strong className="font-semibold text-[#111827]">MyLeenTo3</strong> combina reconstrucción métrica densa en GPU (<span className="font-mono-tech text-xs text-[#15284B]">EXIF + MoGe-2 ViT-S/B/L + YOLOE</span>), reconstrucción multi-vista 360° y una compuerta determinista en Python que bloquea colisiones y levitaciones físicas antes de decidir.
+                </p>
 
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 pt-1 text-xs text-[#4B5563]">
-                  <span className="font-mono-tech text-[11px]">
-                    SAT 15-ejes · Kay-Kajiya · MoGe-2 ViT-S
-                  </span>
+                <div className="flex flex-wrap items-center gap-3 pt-1">
                   <button
                     type="button"
                     onClick={() => onOpenLab(featured?.id)}
-                    className="inline-flex items-center gap-1 font-medium text-[#1D4ED8] hover:underline"
+                    className="inline-flex items-center gap-2 rounded-sm bg-[#15284B] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]"
                   >
-                    <span>Inspeccionar en vivo</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
+                    <span>Abrir Laboratorio 3D</span>
+                    <ArrowRight className="h-4 w-4" />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('multiview')}
+                    className="inline-flex items-center gap-2 rounded-sm border border-[#0F766E]/40 bg-[#F4FBF9]/90 px-4 py-2.5 text-sm font-medium text-[#0F766E] transition-colors hover:border-[#0F766E] hover:bg-[#FFFFFF]"
+                  >
+                    <Orbit className="h-4 w-4" />
+                    <span>Reconstrucción 360°</span>
+                  </button>
+                  <a
+                    href="#problematica-scroll"
+                    className="inline-flex items-center gap-2 rounded-sm border border-[#111827]/20 bg-[#FFFFFF]/80 px-4 py-2.5 text-sm font-medium text-[#111827] transition-colors hover:border-[#111827]"
+                  >
+                    <span>Explorar Problemática</span>
+                    <ArrowDown className="h-4 w-4 text-[#4B5563]" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('multiframe')}
+                    className="inline-flex items-center gap-2 rounded-sm border border-[#111827]/20 bg-[#FFFFFF]/80 px-4 py-2.5 text-sm font-medium text-[#111827] transition-colors hover:border-[#111827]"
+                  >
+                    <Film className="h-4 w-4 text-[#4B5563]" />
+                    <span>Multi-Frame</span>
+                  </button>
+                </div>
+
+                {/* Unboxed Typographic Metrics Ledger */}
+                <dl className="grid max-w-lg grid-cols-3 border-t border-[#15284B]/20 pt-5">
+                  <div className="pr-4">
+                    <dt className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
+                      Precisión 3D
+                    </dt>
+                    <dd className="font-mono-tech mt-1 text-lg font-semibold text-[#1D4ED8]">
+                      69.9% mIoU
+                    </dd>
+                  </div>
+                  <div className="border-l border-[#15284B]/15 px-4">
+                    <dt className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
+                      Error Traslación
+                    </dt>
+                    <dd className="font-mono-tech mt-1 text-lg font-semibold text-[#0F766E]">
+                      4.6 cm ATE
+                    </dd>
+                  </div>
+                  <div className="border-l border-[#15284B]/15 pl-4">
+                    <dt className="font-mono-tech text-[10px] uppercase tracking-wider text-[#4B5563]">
+                      Cálculo GPU / FOV
+                    </dt>
+                    <dd className="font-mono-tech mt-1 text-lg font-semibold text-[#B45309]">
+                      365 ms
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* Right Architectural Specimen Plate with Parallax Shift */}
+              <div className="relative lg:col-span-6">
+                <div
+                  className="parallax-layer relative border border-[#15284B]/22 bg-[#FFFFFF]/92 shadow-[0_14px_34px_-18px_rgba(21,40,75,0.22)] backdrop-blur-[2px]"
+                  style={{ '--parallax-y': '-20px' } as React.CSSProperties}
+                >
+                  <div className="flex items-center justify-between bg-[#15284B] px-4 py-2.5 text-xs text-[#F8FAFC]">
+                    <span className="font-mono-tech uppercase tracking-wider">
+                      Lámina I — Banco Óptico Calibrado 9-DOF
+                    </span>
+                    <span className="font-mono-tech text-[11px] text-[#CBD5E1]">
+                      FOV_h 60.0° · 960×640
+                    </span>
+                  </div>
+
+                  <div className="p-4">
+                    {featured?.image_base64 ? (
+                      <div className="relative overflow-hidden border border-[#111827]/12 bg-[#FFFFFF]">
+                        <img
+                          src={normalizeBase64Image(featured.image_base64)}
+                          alt={featured.title}
+                          className="block h-auto w-full object-cover"
+                        />
+                        <svg
+                          viewBox="0 0 960 640"
+                          className="pointer-events-none absolute inset-0 h-full w-full"
+                          aria-hidden="true"
+                        >
+                          <line x1="480" y1="0" x2="480" y2="640" stroke="#1D4ED8" strokeOpacity="0.28" strokeDasharray="6 6" />
+                          <line x1="0" y1="320" x2="960" y2="320" stroke="#1D4ED8" strokeOpacity="0.28" strokeDasharray="6 6" />
+                          <circle cx="480" cy="320" r="14" fill="none" stroke="#1D4ED8" strokeWidth="1.5" strokeOpacity="0.7" />
+                          <rect x="20" y="20" width="248" height="30" fill="#FFFFFF" fillOpacity="0.94" stroke="#15284B" strokeOpacity="0.28" />
+                          <text x="34" y="39" fontFamily="JetBrains Mono, monospace" fontSize="12.5" fill="#15284B">
+                            K: f=831.4px · det(M) = +1.0
+                          </text>
+                        </svg>
+                      </div>
+                    ) : (
+                      <div className="flex aspect-[3/2] items-center justify-center border border-dashed border-[#111827]/20 bg-[#F7F7F5]/60 p-6 text-center">
+                        <p className="font-mono-tech text-xs text-[#4B5563]">
+                          Cargando escena calibrada desde /api/benchmarks…
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 pt-1 text-xs text-[#4B5563]">
+                      <span className="font-mono-tech text-[11px]">
+                        SAT 15-ejes · Kay-Kajiya · MoGe-2 ViT-S/B/L
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onOpenLab(featured?.id)}
+                        className="inline-flex items-center gap-1 font-medium text-[#1D4ED8] hover:underline"
+                      >
+                        <span>Inspeccionar en vivo</span>
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -798,7 +816,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         <section
           id="problematica-scroll"
           aria-label="Problemática principal antes de usar modelos 3D"
-          className="problem-scroll-section border-t border-[#111827]/15 bg-[#FFFFFF]/34 py-14 backdrop-blur-[1px] sm:py-18"
+          className="problem-scroll-section border-t border-[#15284B]/18 bg-gradient-to-b from-[#FAF7F2]/82 via-[#F4F7FA]/80 to-[#F3F9F7]/82 py-14 backdrop-blur-[1px] sm:py-18"
         >
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
             {/* Asymmetric Editorial Header */}
@@ -815,13 +833,13 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 Antes de abrir el Laboratorio 3D, observa por qué no basta con dibujar cajas o invocar a ciegas una IA sobre una foto común: cada lámina contrapone la falla física frente a su verificación geométrica exacta.
               </p>
             </div>
-            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/20" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-[2px] w-full bg-gradient-to-r from-[#BE123C]/55 via-[#B45309]/55 to-[#0F766E]/55" />
 
-            {/* SPREAD I: Text Left / Diagram Right */}
+            {/* SPREAD I: Text Left / Diagram Right (Crimson accent) */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <article data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4 pr-0 lg:pr-8">
+              <article data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4 border-l-2 border-[#BE123C]/65 pl-5 pr-0 lg:pr-8">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#BE123C]/40">
                     I
                   </span>
                   <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#BE123C]">
@@ -834,13 +852,13 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 <p className="max-w-[54ch] text-sm leading-relaxed text-[#4B5563]">
                   En imágenes planas, un detector tradicional no distingue si un obstáculo está a <strong className="font-semibold text-[#111827]">1.4 m</strong> o a <strong className="font-semibold text-[#111827]">4.8 m</strong>. Cuando otro cuerpo lo cubre parcialmente, los descriptores clásicos HSV/LBP/HOG colapsan (<span className="font-mono-tech text-xs text-[#111827]">F1 &le; 0.104</span>) y hasta <span className="font-mono-tech text-xs text-[#111827]">MobileNetV2 INT8</span> desciende a <span className="font-mono-tech text-xs text-[#111827]">F1 = 0.715</span>.
                 </p>
-                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#111827]/12 pt-3 text-[11px] text-[#0F766E]">
+                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#BE123C]/15 pt-3 text-[11px] text-[#0F766E]">
                   <span>Ray-Tracing Kay-Kajiya: hasta 89% de oclusión medida</span>
                   <span className="text-[#4B5563]">Δy real = 1.8 m</span>
                 </div>
               </article>
 
-              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 border border-[#111827]/15 bg-[#FFFFFF]/84 p-4">
+              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 border border-[#BE123C]/22 bg-[#FFF9F8]/92 p-4">
                 <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha I: oclusión 2D vs rayos 3D Kay-Kajiya">
                   <rect x="4" y="4" width="212" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
                   <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#4B5563">FOTO 2D SIN PROFUNDIDAD</text>
@@ -867,10 +885,10 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
             </div>
             <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
 
-            {/* SPREAD II: Diagram Left (Animated Scroll Bars) / Text Right */}
+            {/* SPREAD II: Diagram Left (Animated Scroll Bars) / Text Right (Warm Ochre accent) */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <div data-scroll-anim="enter-left" className="scroll-enter-left order-2 border border-[#111827]/15 bg-[#FFFFFF]/84 p-6 lg:order-1 lg:col-span-6">
-                <div className="font-mono-tech mb-5 text-[10px] font-semibold uppercase tracking-wider text-[#111827]">
+              <div data-scroll-anim="enter-left" className="scroll-enter-left order-2 border border-[#B45309]/25 bg-[#FFFDF7]/92 p-6 lg:order-1 lg:col-span-6">
+                <div className="font-mono-tech mb-5 text-[10px] font-semibold uppercase tracking-wider text-[#B45309]">
                   Costo de Inferencia y Decisión Adaptativa
                 </div>
                 <div className="space-y-4">
@@ -904,9 +922,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </div>
 
-              <article data-scroll-anim="enter-right" className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 pl-0 lg:pl-8">
+              <article data-scroll-anim="enter-right" className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 border-l-2 border-[#B45309]/65 pl-5">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#B45309]/45">
                     II
                   </span>
                   <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#B45309]">
@@ -919,22 +937,22 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 <p className="max-w-[54ch] text-sm leading-relaxed text-[#4B5563]">
                   Los escáneres LiDAR encarecen cualquier cámara, pero invocar modelos VLM profundos en el 100% de cuadros desperdicia latencia y cuota. Heredando la cascada <span className="font-mono-tech text-xs text-[#111827]">64→224 px</span> de <span className="font-mono-tech text-xs text-[#111827]">C8286</span> (que recortó <strong className="font-semibold text-[#111827]">97.5%</strong> de ancho de banda), la compuerta decide en qué escenas basta una ruta rápida y cuándo escalar.
                 </p>
-                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#111827]/12 pt-3 text-[11px] text-[#0F766E]">
+                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#B45309]/15 pt-3 text-[11px] text-[#0F766E]">
                   <span>APROBADO: −45% / −72% latencia</span>
                   <span className="text-[#4B5563]">GPU local: MoGe-2 ViT-S (~1.3 GB VRAM)</span>
                 </div>
               </article>
             </div>
-            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#15284B]/18" />
 
-            {/* SPREAD III: Text Left / Diagram Right */}
+            {/* SPREAD III: Text Left / Diagram Right (Terracotta/Burgundy accent) */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <article data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4 pr-0 lg:pr-8">
+              <article data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4 border-l-2 border-[#9F1239]/65 pl-5 pr-0 lg:pr-8">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#9F1239]/40">
                     III
                   </span>
-                  <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#BE123C]">
+                  <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#9F1239]">
                     Física Imposible — Auditoría Sin Ground Truth
                   </span>
                 </div>
@@ -944,12 +962,12 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 <p className="max-w-[54ch] text-sm leading-relaxed text-[#4B5563]">
                   Un VLM sin restricciones físicas puede ubicar un objeto flotando medio metro en el aire (<span className="font-mono-tech text-xs text-[#111827]">GFI</span>), superponer dos volúmenes rígidos en el mismo espacio (<span className="font-mono-tech text-xs text-[#111827]">PVI SAT</span>) o inflar escalas bajo ruido fotométrico (<span className="font-mono-tech text-xs text-[#111827]">±σ_y ∝ y²</span>).
                 </p>
-                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#111827]/12 pt-3 text-[11px] text-[#0F766E]">
+                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#9F1239]/15 pt-3 text-[11px] text-[#0F766E]">
                   <span>PECS Sobel + SAT 15-ejes + bloqueo RECHAZADO_FISICA</span>
                 </div>
               </article>
 
-              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 border border-[#111827]/15 bg-[#FFFFFF]/84 p-4">
+              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 border border-[#9F1239]/22 bg-[#FDF8F8]/92 p-4">
                 <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha III: colisión SAT PVI y levitación GFI">
                   <rect x="4" y="4" width="218" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
                   <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#BE123C">COLISIÓN SÓLIDA SAT (PVI)</text>
@@ -970,13 +988,13 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </svg>
               </div>
             </div>
-            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/15" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#15284B]/18" />
 
-            {/* SPREAD IV: Diagram Left / Text Right */}
+            {/* SPREAD IV: Diagram Left / Text Right (Botanical Teal accent) */}
             <div className="grid items-center gap-10 py-14 lg:grid-cols-12">
-              <div data-scroll-anim="enter-left" className="scroll-enter-left order-2 border border-[#111827]/15 bg-[#FFFFFF]/84 p-4 lg:order-1 lg:col-span-6">
+              <div data-scroll-anim="enter-left" className="scroll-enter-left order-2 border border-[#0F766E]/25 bg-[#F4FBF9]/92 p-4 lg:order-1 lg:col-span-6">
                 <svg viewBox="0 0 460 190" className="h-auto w-full" role="img" aria-label="Diagrama brecha IV: sensibilidad FOV y deriva multi-frame">
-                  <rect x="4" y="4" width="222" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
+                  <rect x="4" y="4" width="222" height="182" fill="#FFFFFF" stroke="#CBD5E1" />
                   <text x="16" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#1D4ED8">DESCALIBRADO FOV_h (PINHOLE)</text>
                   <line x1="26" y1="142" x2="206" y2="142" stroke="#CBD5E1" strokeWidth="1.2" />
                   <line x1="26" y1="48" x2="26" y2="142" stroke="#CBD5E1" strokeWidth="1.2" />
@@ -986,7 +1004,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                   <text x="148" y="114" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#BE123C">100°: 2.6%</text>
                   <text x="115" y="168" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#4B5563">Reproyección en vivo &lt; 10 ms</text>
 
-                  <rect x="236" y="4" width="220" height="182" fill="#F7F7F5" stroke="#CBD5E1" />
+                  <rect x="236" y="4" width="220" height="182" fill="#FFFFFF" stroke="#CBD5E1" />
                   <text x="248" y="24" fontFamily="JetBrains Mono, monospace" fontSize="10" fontWeight="700" fill="#0F766E">DERIVA VIDEO (WORLD MODELS)</text>
                   <rect x="256" y="56" width="38" height="44" fill="#FFFFFF" stroke="#1D4ED8" strokeWidth="1.6" />
                   <rect x="314" y="48" width="54" height="58" fill="#FFFFFF" stroke="#B45309" strokeWidth="1.6" />
@@ -998,12 +1016,12 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </svg>
               </div>
 
-              <article data-scroll-anim="enter-right" className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 pl-0 lg:pl-8">
+              <article data-scroll-anim="enter-right" className="scroll-enter-right order-1 lg:order-2 lg:col-span-6 space-y-4 border-l-2 border-[#0F766E]/65 pl-5">
                 <div className="flex items-baseline gap-4">
-                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#111827]/25">
+                  <span className="font-serif-editorial text-4xl font-semibold leading-none text-[#0F766E]/45">
                     IV
                   </span>
-                  <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#1D4ED8]">
+                  <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#0F766E]">
                     Óptica FOV y Deriva Temporal
                   </span>
                 </div>
@@ -1013,21 +1031,21 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 <p className="max-w-[54ch] text-sm leading-relaxed text-[#4B5563]">
                   Un error en la focal derrumba el calce 2D-3D desde <strong className="font-semibold text-[#111827]">80.7%</strong> (<span className="font-mono-tech text-xs text-[#111827]">60°</span>) hasta <strong className="font-semibold text-[#111827]">2.6%</strong> (<span className="font-mono-tech text-xs text-[#111827]">100°</span>), mientras fotos verticales en primer plano (<span className="font-mono-tech text-xs text-[#111827]">~36°</span>) distorsionan distancias si se asume un gran angular fijo. En video, un <em>World Model</em> deforma volúmenes cuadro a cuadro (<strong className="font-semibold text-[#111827]">17.0%</strong> en <em>transport crate</em>).
                 </p>
-                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#111827]/12 pt-3 text-[11px] text-[#0F766E]">
+                <div className="font-mono-tech flex flex-wrap gap-x-6 gap-y-1 border-t border-[#0F766E]/15 pt-3 text-[11px] text-[#0F766E]">
                   <span>EXIF + Intrínsecos MoGe-2 automáticos + Auditoría Multi-Frame</span>
                 </div>
               </article>
             </div>
-            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-px w-full bg-[#111827]/20" />
+            <div data-scroll-anim="rule-draw" className="scroll-rule-draw h-[2px] w-full bg-gradient-to-r from-[#0F766E]/50 via-[#1D4ED8]/50 to-[#B45309]/50" />
 
             <div data-scroll-anim="curtain-up" className="scroll-curtain-up mt-10 flex flex-wrap items-center justify-between gap-4">
-              <span className="font-mono-tech text-xs text-[#4B5563]">
-                Reconstrucción local en vivo + 7 herramientas espaciales verificables
+              <span className="font-mono-tech text-xs text-[#15284B]">
+                Reconstrucción local en vivo + 8 herramientas espaciales + Reconstrucción 360°
               </span>
               <div className="flex flex-wrap items-center gap-3">
                 <a
                   href="#scrolly-3d-story"
-                  className="inline-flex items-center gap-2 rounded-sm border border-[#111827]/20 bg-[#FFFFFF]/80 px-4 py-2 text-xs font-medium text-[#111827] transition-colors hover:border-[#111827]"
+                  className="inline-flex items-center gap-2 rounded-sm border border-[#15284B]/25 bg-[#FFFFFF]/88 px-4 py-2 text-xs font-medium text-[#15284B] transition-colors hover:border-[#15284B]"
                 >
                   <span>Pipeline 3D al scroll</span>
                   <ArrowDown className="h-3.5 w-3.5 text-[#4B5563]" />
@@ -1035,7 +1053,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenLab(featured?.id)}
-                  className="inline-flex items-center gap-2 rounded-sm bg-[#1D4ED8] px-5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#1E40AF]"
+                  className="inline-flex items-center gap-2 rounded-sm bg-[#15284B] px-5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#1D4ED8]"
                 >
                   <span>Ir al Laboratorio 3D</span>
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -1045,25 +1063,25 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
           </div>
         </section>
 
-        {/* 3. Scroll-Driven 3D Scrollytelling Section */}
+        {/* 3. Scroll-Driven 3D Scrollytelling Section (Deep Prussian-Slate Drafting Band) */}
         <section
           id="scrolly-3d-story"
           ref={storyRef}
-          className="scrolly-narrative-scope border-t border-[#111827]/15 bg-[#F7F7F5]/30 py-16 backdrop-blur-[1px]"
+          className="scrolly-narrative-scope border-t border-[#15284B] bg-[#101C31]/95 py-16 text-[#F8FAFC] backdrop-blur-[1.5px]"
         >
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
-            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-6">
+            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#334155] pb-6">
               <div data-scroll-anim="curtain-up" className="scroll-curtain-up max-w-2xl">
-                <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#1D4ED8]">
+                <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#F59E0B]">
                   Narrativa 3D Sincronizada al Scroll
                 </span>
-                <h2 className="font-serif-editorial mt-1.5 text-3xl leading-[1.08] text-[#111827] sm:text-4xl">
+                <h2 className="font-serif-editorial mt-1.5 text-3xl leading-[1.08] text-[#F8FAFC] sm:text-4xl">
                   Cómo pasa una imagen plana a geometría 3D auditable
                 </h2>
               </div>
 
               {/* Minimal Underline Chapter Selector */}
-              <div className="flex flex-wrap items-center gap-4 border-b border-[#111827]/10" role="tablist" aria-label="Etapas del pipeline 3D">
+              <div className="flex flex-wrap items-center gap-4 border-b border-[#334155]" role="tablist" aria-label="Etapas del pipeline 3D">
                 {CHAPTERS.map((ch, idx) => {
                   const isAct = activeChapter === idx;
                   return (
@@ -1075,11 +1093,11 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       onClick={() => jumpToChapter(idx)}
                       className={`border-b-2 pb-2 text-xs font-medium transition-colors ${
                         isAct
-                          ? 'border-[#111827] text-[#111827]'
-                          : 'border-transparent text-[#4B5563] hover:text-[#111827]'
+                          ? 'border-[#F59E0B] text-[#FFFFFF]'
+                          : 'border-transparent text-[#94A3B8] hover:text-[#F8FAFC]'
                       }`}
                     >
-                      <span className="font-mono-tech mr-1.5 opacity-60">{ch.step}</span>
+                      <span className="font-mono-tech mr-1.5 opacity-70">{ch.step}</span>
                       {ch.shortLabel}
                     </button>
                   );
@@ -1093,6 +1111,8 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 {CHAPTERS.map((ch, idx) => {
                   const isAct = activeChapter === idx;
                   const chapterClass = `scrolly-chapter-${idx + 1}`;
+                  const darkAccents = ['#60A5FA', '#38BDF8', '#FB7185', '#2DD4BF'];
+                  const darkAccent = darkAccents[idx % darkAccents.length];
                   return (
                     <article
                       key={ch.step}
@@ -1103,23 +1123,25 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                     >
                       <div
                         onClick={() => jumpToChapter(idx)}
-                        className={`scrolly-card-inner cursor-pointer border-l-2 bg-[#FFFFFF]/76 py-4 pl-5 pr-4 transition-colors backdrop-blur-[1.5px] ${
-                          isAct ? 'bg-[#FFFFFF]/92' : 'opacity-85 hover:opacity-100'
+                        className={`scrolly-card-inner cursor-pointer border-l-2 py-4 pl-5 pr-4 transition-colors backdrop-blur-[1.5px] ${
+                          isAct
+                            ? 'bg-[#1B2E4F] opacity-100'
+                            : 'bg-[#162540]/88 opacity-85 hover:opacity-100'
                         }`}
                         style={{
-                          borderLeftColor: isAct ? ch.accent : 'rgba(17, 24, 39, 0.16)',
+                          borderLeftColor: isAct ? darkAccent : 'rgba(148, 163, 184, 0.28)',
                         }}
                       >
                         <div className="font-mono-tech flex items-center justify-between gap-2 text-[11px]">
-                          <span style={{ color: ch.accent }} className="font-semibold uppercase tracking-wider">
+                          <span style={{ color: darkAccent }} className="font-semibold uppercase tracking-wider">
                             {ch.step} / {ch.shortLabel}
                           </span>
-                          <span className="text-[#4B5563]">{ch.metricTag}</span>
+                          <span className="text-[#CBD5E1]">{ch.metricTag}</span>
                         </div>
-                        <h3 className="font-serif-editorial mt-2 text-xl leading-snug text-[#111827]">
+                        <h3 className="font-serif-editorial mt-2 text-xl leading-snug text-[#F8FAFC]">
                           {ch.title}
                         </h3>
-                        <p className="mt-2 text-xs leading-relaxed text-[#4B5563]">
+                        <p className="mt-2 text-xs leading-relaxed text-[#CBD5E1]">
                           {ch.summary}
                         </p>
                       </div>
@@ -1130,20 +1152,20 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
 
               {/* Right Column: Sticky Live Three.js WebGL Stage */}
               <div className="lg:sticky lg:top-20 lg:col-span-7">
-                <div className="border border-[#111827]/15 bg-[#FFFFFF]/88 backdrop-blur-[2px]">
-                  <div className="flex items-center justify-between border-b border-[#111827]/12 bg-[#F7F7F5]/80 px-4 py-2.5">
-                    <div className="flex items-center gap-2 text-xs font-medium text-[#111827]">
-                      <Compass className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                <div className="border border-[#334155] bg-[#162540]">
+                  <div className="flex items-center justify-between border-b border-[#334155] bg-[#132038] px-4 py-2.5">
+                    <div className="flex items-center gap-2 text-xs font-medium text-[#F8FAFC]">
+                      <Compass className="h-3.5 w-3.5 text-[#F59E0B]" />
                       <span>{CHAPTERS[activeChapter]?.title}</span>
                     </div>
-                    <span className="font-mono-tech text-[11px] text-[#4B5563]">
+                    <span className="font-mono-tech text-[11px] text-[#94A3B8]">
                       {isStageVisible ? 'WebGL Activo' : 'Pausado (Off-screen)'}
                     </span>
                   </div>
 
                   <div
                     ref={stageBoxRef}
-                    className="webgl-stage-container relative h-[360px] w-full bg-[#F0F2F5] sm:h-[440px]"
+                    className="webgl-stage-container relative h-[360px] w-full bg-[#142238] sm:h-[440px]"
                     style={{ touchAction: 'pan-y' }}
                   >
                     <Canvas
@@ -1153,9 +1175,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       camera={{ position: [0.3, 0.25, 0.3], fov: 42, near: 0.05, far: 60 }}
                       gl={{ antialias: true, powerPreference: 'high-performance' }}
                     >
-                      <color attach="background" args={['#F0F2F5']} />
-                      <ambientLight intensity={0.85} />
-                      <directionalLight position={[4, 7, 4]} intensity={0.9} />
+                      <color attach="background" args={['#142238']} />
+                      <ambientLight intensity={0.95} />
+                      <directionalLight position={[4, 7, 4]} intensity={1.0} />
 
                       <ScrollRigAndOverlays
                         boxes={demoBoxes}
@@ -1173,19 +1195,19 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       ))}
                     </Canvas>
 
-                    <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-wrap items-center justify-between gap-2 border border-[#111827]/15 bg-[#FFFFFF]/92 px-3 py-1.5 text-[11px] text-[#4B5563]">
-                      <span className="font-mono-tech text-[#111827]">
+                    <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-wrap items-center justify-between gap-2 border border-[#334155] bg-[#101C31]/92 px-3 py-1.5 text-[11px] text-[#CBD5E1]">
+                      <span className="font-mono-tech text-[#F8FAFC]">
                         Etapa {CHAPTERS[activeChapter]?.step}/04 · Desplázate para animar cámara 3D
                       </span>
                       <div className="flex items-center gap-3">
                         <span className="inline-flex items-center gap-1">
-                          <span className="h-2 w-2 bg-[#1D4ED8]" /> Predicción
+                          <span className="h-2 w-2 bg-[#60A5FA]" /> Predicción
                         </span>
                         <span className="inline-flex items-center gap-1">
-                          <span className="h-2 w-2 bg-[#0F766E]" /> GT Esmeralda
+                          <span className="h-2 w-2 bg-[#14B8A6]" /> GT Esmeralda
                         </span>
                         <span className="inline-flex items-center gap-1">
-                          <span className="h-2 w-2 bg-[#BE123C]" /> Regla 3D
+                          <span className="h-2 w-2 bg-[#F43F5E]" /> Regla 3D
                         </span>
                       </div>
                     </div>
@@ -1197,9 +1219,9 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </section>
 
         {/* 4. Universal Metrics Architectural Ledger (No Ground Truth) */}
-        <section className="border-t border-[#111827]/15 bg-[#FFFFFF]/36 py-16 backdrop-blur-[1px]">
+        <section className="border-t border-[#15284B]/18 bg-gradient-to-br from-[#FBF8F3]/88 via-[#FFFFFF]/88 to-[#F1F8F6]/88 py-16 backdrop-blur-[1px]">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
-            <div data-scroll-anim="curtain-up" className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-5">
+            <div data-scroll-anim="curtain-up" className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#15284B]/18 pb-5">
               <div>
                 <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#0F766E]">
                   Diagnóstico Intrínseco Sin Referencia
@@ -1225,7 +1247,8 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                   <article
                     key={cap.code}
                     data-scroll-anim="curtain-up"
-                    className={`scroll-curtain-up ${stagger} border-t border-[#111827]/18 pt-4`}
+                    className={`scroll-curtain-up ${stagger} border-t-2 pt-4`}
+                    style={{ borderTopColor: cap.color }}
                   >
                     <div
                       className="font-mono-tech text-[11px] font-semibold uppercase tracking-[0.12em]"
@@ -1247,7 +1270,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </section>
 
         {/* 5. C8286 Lineage & Rigor Index (Editorial Split, No Box Grid) */}
-        <section className="problem-scroll-section border-t border-[#111827]/15 bg-[#F7F7F5]/30 py-16 backdrop-blur-[1px]">
+        <section className="problem-scroll-section border-t border-[#15284B]/15 bg-gradient-to-r from-[#EEF4F8]/86 via-[#F8F9FB]/88 to-[#FBF6EC]/86 py-16 backdrop-blur-[1px]">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
             <div className="grid items-start gap-12 lg:grid-cols-12">
               <div data-scroll-anim="enter-left" className="scroll-enter-left lg:col-span-6 space-y-4">
@@ -1273,40 +1296,40 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                 </div>
               </div>
 
-              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 divide-y divide-[#111827]/15 border-y border-[#111827]/15 bg-[#FFFFFF]/80 px-5 backdrop-blur-[1.5px]">
-                <div className="py-5">
+              <div data-scroll-anim="enter-right" className="scroll-enter-right lg:col-span-6 divide-y divide-[#15284B]/12 border-y border-[#15284B]/18 bg-[#FFFFFF]/88 px-5 backdrop-blur-[1.5px]">
+                <div className="border-l-2 border-[#1D4ED8] py-5 pl-4">
                   <div className="font-mono-tech text-[11px] uppercase tracking-wider text-[#1D4ED8]">
-                    01 — Motor GPU Métrico Local (RTX 3050)
+                    01 — Motor GPU Métrico Local (MoGe-2 ViT-S/B/L)
                   </div>
                   <h3 className="font-serif-editorial mt-1 text-xl text-[#111827]">
-                    MoGe-2 ViT-S más segmentación abierta YOLOE
+                    Descubrimiento VLM/YOLOE-PF y hasta 80,000 surfels 2DGS
                   </h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-[#4B5563]">
-                    Extrae <span className="font-mono-tech text-[#111827]">FOV_h</span> vía EXIF o intrínsecos neuronales, reconstruye nube de puntos 3D coloreada (<span className="font-mono-tech text-[#111827]">16,000</span> vértices) y mide fotos en primer plano en <span className="font-mono-tech text-[#111827]">~365 ms</span> sin requerir API Key externa.
+                    Extrae <span className="font-mono-tech text-[#111827]">FOV_h</span> vía EXIF o intrínsecos neuronales, levanta vocabulario abierto (<span className="font-mono-tech text-[#111827]">YOLOE-PF 4,585 cl. / OV</span>) y construye nube 2DGS + malla 2.5D exportable a <span className="font-mono-tech text-[#111827]">.PLY</span>.
                   </p>
                 </div>
 
-                <div className="py-5">
+                <div className="border-l-2 border-[#0F766E] py-5 pl-4">
                   <div className="font-mono-tech text-[11px] uppercase tracking-wider text-[#0F766E]">
-                    02 — Proyección Pinhole K en Vivo
+                    02 — Metrología Exacta Fase 2 (Calibrador 3D + ArUco)
                   </div>
                   <h3 className="font-serif-editorial mt-1 text-xl text-[#111827]">
-                    Calibración óptica instantánea entre 25° y 120°
+                    Calibración física directa y perfil topográfico superficial
                   </h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-[#4B5563]">
-                    Ajusta el campo de visión horizontal y reproyecta todos los cuboides 9-DOF en menos de <span className="font-mono-tech text-[#111827]">10 ms</span> sin consumir cuota adicional.
+                    Mide arco superficial en milímetros con 2 clics sobre WebGL, fija escala real con tarjeta/moneda/hoja A4 o marcadores <span className="font-mono-tech text-[#111827]">ArUco</span> y reproyecta <span className="font-mono-tech text-[#111827]">FOV_h</span> en menos de <span className="font-mono-tech text-[#111827]">10 ms</span>.
                   </p>
                 </div>
 
-                <div className="py-5">
+                <div className="border-l-2 border-[#B45309] py-5 pl-4">
                   <div className="font-mono-tech text-[11px] uppercase tracking-wider text-[#B45309]">
-                    03 — Copiloto y Compuerta de 7 Funciones
+                    03 — Reconstrucción 360° Fase 3 y Copiloto 8 Funciones
                   </div>
                   <h3 className="font-serif-editorial mt-1 text-xl text-[#111827]">
-                    Herramientas geométricas auditables en Python
+                    Registro SIFT + Sim(3) Umeyama + ICP y ActivePose NBV
                   </h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-[#4B5563]">
-                    Controla la cámara Three.js, mide distancia superficie-a-superficie, detecta colisiones SAT y dictamina el escalamiento <span className="font-mono-tech text-[#111827]">APROBADO / ESCALAR_MODELO / RECHAZADO_FISICA</span>.
+                    Une 2 a 6 vistas en volumen sólido tomográfico / ConvexHull 360° con guía polar de zonas ciegas, junto al copiloto inteligente con 8 funciones geométricas auditables.
                   </p>
                 </div>
               </div>
@@ -1315,11 +1338,11 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
         </section>
 
         {/* 6. Benchmarks Specimen Plates with View Transition Continuity */}
-        <section className="border-t border-[#111827]/15 bg-[#FFFFFF]/36 py-16 backdrop-blur-[1px]">
+        <section className="border-t border-[#15284B]/18 bg-[#F6F2EA]/88 py-16 backdrop-blur-[1px]">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6">
-            <div data-scroll-anim="curtain-up" className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#111827]/15 pb-5">
+            <div data-scroll-anim="curtain-up" className="scroll-curtain-up flex flex-wrap items-end justify-between gap-4 border-b border-[#15284B]/18 pb-5">
               <div>
-                <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#4B5563]">
+                <span className="font-mono-tech text-[11px] uppercase tracking-[0.14em] text-[#15284B]">
                   Banco Reproducible — SEED = 42
                 </span>
                 <h2 className="font-serif-editorial mt-1 text-3xl text-[#111827] sm:text-4xl">
@@ -1339,13 +1362,15 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
             <div className="mt-8 grid gap-6 md:grid-cols-3">
               {benchmarks.map((scene, idx) => {
                 const stagger = `scroll-stagger-${(idx % 3) + 1}`;
+                const plateAccent = ['#1D4ED8', '#B45309', '#0F766E'][idx % 3];
                 return (
                   <article
                     key={scene.id}
                     data-scroll-anim="curtain-up"
-                    className={`benchmark-card scroll-curtain-up ${stagger} group flex flex-col border border-[#111827]/15 bg-[#FFFFFF]/86 transition-colors hover:border-[#1D4ED8]`}
+                    className={`benchmark-card scroll-curtain-up ${stagger} group flex flex-col border border-[#15284B]/16 border-t-2 bg-[#FFFFFF]/92 transition-colors hover:border-[#15284B]`}
+                    style={{ borderTopColor: plateAccent }}
                   >
-                    <div className="benchmark-thumb aspect-[3/2] overflow-hidden border-b border-[#111827]/12 bg-[#F0F2F5]">
+                    <div className="benchmark-thumb aspect-[3/2] overflow-hidden border-b border-[#15284B]/12 bg-[#F0F2F5]">
                       <img
                         src={normalizeBase64Image(scene.image_base64)}
                         alt={scene.title}
@@ -1354,7 +1379,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                     </div>
                     <div className="flex flex-1 flex-col p-5">
                       <div className="font-mono-tech flex items-center justify-between gap-2 text-[11px]">
-                        <span className="text-[#1D4ED8]">{scene.id}</span>
+                        <span style={{ color: plateAccent }} className="font-semibold">{scene.id}</span>
                         <span className="text-[#4B5563]">
                           {scene.gt_objects.length} OBBs GT
                         </span>
@@ -1368,7 +1393,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleBenchmarkOpen(scene.id, e)}
-                        className="mt-4 inline-flex w-full items-center justify-center gap-1.5 border border-[#111827]/20 bg-[#F7F7F5] px-3 py-2 text-xs font-medium text-[#111827] transition-colors hover:border-[#111827] hover:bg-[#111827] hover:text-white"
+                        className="mt-4 inline-flex w-full items-center justify-center gap-1.5 border border-[#15284B]/22 bg-[#F7F7F5] px-3 py-2 text-xs font-medium text-[#15284B] transition-colors hover:border-[#15284B] hover:bg-[#15284B] hover:text-white"
                       >
                         <span>Cargar en Laboratorio 3D</span>
                         <ArrowRight className="h-3.5 w-3.5" />

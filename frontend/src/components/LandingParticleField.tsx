@@ -34,10 +34,12 @@ const MIN_DIST_3D_SQ = 0.34 * 0.34;
 const LINK_MIN_DIST_SQ = 52 * 52;
 const LINK_MAX_DIST_SQ = 148 * 148;
 const PALETTE: Array<[number, number, number]> = [
-  [51, 65, 85],   // Slate #334155
+  [21, 40, 75],   // Prussian Slate #15284B
   [29, 78, 216],  // Cobalt #1D4ED8
-  [15, 118, 110], // Emerald #0F766E
-  [180, 83, 9],   // Amber #B45309
+  [15, 118, 110], // Botanical Teal #0F766E
+  [180, 83, 9],   // Warm Ochre #B45309
+  [190, 18, 60],  // Editorial Crimson #BE123C
+  [59, 91, 219],  // Steel Indigo #3B5BDB
 ];
 
 function mulberry32(seed: number): () => number {
@@ -101,13 +103,17 @@ function buildParticles(): ParticleNode[] {
 
     const paletteRoll = rng();
     const color =
-      paletteRoll < 0.40
+      paletteRoll < 0.26
         ? PALETTE[0]
-        : paletteRoll < 0.72
+        : paletteRoll < 0.48
         ? PALETTE[1]
-        : paletteRoll < 0.90
+        : paletteRoll < 0.68
         ? PALETTE[2]
-        : PALETTE[3];
+        : paletteRoll < 0.82
+        ? PALETTE[3]
+        : paletteRoll < 0.92
+        ? PALETTE[4]
+        : PALETTE[5];
 
     const shapeRoll = rng();
     const variant: ParticleVariant =
@@ -240,7 +246,7 @@ export const LandingParticleField: React.FC<LandingParticleFieldProps> = ({
         const corridorSoftener =
           centerDist < 0.22 ? 0.52 + 0.48 * (centerDist / 0.22) : 1.0;
 
-        const alpha = (0.38 + depthNorm * 0.38) * corridorSoftener;
+        const alpha = (0.40 + depthNorm * 0.40) * corridorSoftener;
         const radius = Math.max(1.6, n.radius * (0.78 + depthNorm * 0.48));
 
         projected[activeCount++] = {
@@ -266,7 +272,7 @@ export const LandingParticleField: React.FC<LandingParticleFieldProps> = ({
           if (d2 >= LINK_MIN_DIST_SQ && d2 <= LINK_MAX_DIST_SQ) {
             const d = Math.sqrt(d2);
             const distFade = 1 - (d - 52) / (148 - 52);
-            const lineAlpha = Math.min(0.22, Math.max(0.03, distFade * Math.min(a.alpha, b.alpha) * 0.42));
+            const lineAlpha = Math.min(0.25, Math.max(0.03, distFade * Math.min(a.alpha, b.alpha) * 0.44));
             const [r, g, bl] = a.color;
             ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${lineAlpha.toFixed(3)})`;
             ctx.beginPath();

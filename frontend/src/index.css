@@ -2,16 +2,23 @@
 
 :root {
   --bg-canvas: #F7F7F5;
+  --bg-ivory: #FAF8F4;
+  --bg-parchment: #F5F1E8;
+  --bg-prussian: #101C31;
+  --bg-prussian-surface: #162540;
   --bg-surface: #FFFFFF;
   --bg-stage: #F0F2F5;
   --border-hairline: #E2E5EA;
   --grid-metric: #CBD5E1;
   --ink-primary: #111827;
   --ink-secondary: #4B5563;
+  --accent-prussian: #15284B;
   --accent-cobalt: #1D4ED8;
   --accent-emerald: #0F766E;
   --accent-amber: #B45309;
+  --accent-ochre: #B45309;
   --accent-crimson: #BE123C;
+  --accent-terracotta: #9F1239;
 }
 
 /* Registered custom properties for smooth scroll-driven horizontal edge fades */
@@ -55,7 +62,7 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 2.5px;
   background: transparent;
   z-index: 60;
   pointer-events: none;
@@ -64,7 +71,7 @@
 .scroll-progress-bar {
   width: 100%;
   height: 100%;
-  background-color: var(--accent-cobalt);
+  background: linear-gradient(90deg, #1D4ED8 0%, #0F766E 55%, #B45309 100%);
   transform-origin: left center;
   transform: scaleX(0);
 }
