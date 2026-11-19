@@ -18,6 +18,7 @@ from app.core.geometry_3d import (
     gemini_to_threejs_pose,
     project_obb_to_2d,
 )
+from app.core.intrinsic_diagnostics import compute_intrinsic_scene_diagnostics
 from app.core.metrics import evaluate_scene_predictions, fov_sensitivity_sweep
 from app.core.multiframe_audit import (
     audit_multiframe_consistency,
@@ -221,6 +222,7 @@ def analyze_scene(
                     model=req.model,
                     thinking_level=thinking_level,
                     max_objects=req.max_objects,
+                    image_base64=image_b64,
                 )
                 raw_objects = fb["objects"]
                 scene_summary = fb["scene_summary"]
@@ -247,6 +249,7 @@ def analyze_scene(
                 model=req.model,
                 thinking_level=thinking_level,
                 max_objects=req.max_objects,
+                image_base64=image_b64,
             )
             raw_objects = fb["objects"]
             scene_summary = fb["scene_summary"]
@@ -254,8 +257,8 @@ def analyze_scene(
             usage = fb["usage"]
             mode = "deterministic_fallback"
             notice = (
-                "Imagen personalizada analizada en modo determinista offline porque no se detectó "
-                "X-Gemini-API-Key ni GEMINI_API_KEY."
+                "Imagen personalizada analizada con extracción adaptativa de saliencia + diagnóstico intrínseco "
+                "sin referencia (sin X-Gemini-API-Key / GEMINI_API_KEY)."
             )
 
     fov_v_deg = round(compute_fov_v_deg(req.fov_h_deg, width, height), 4)
@@ -266,9 +269,17 @@ def analyze_scene(
         else None
     )
     occlusion_matrix = compute_occlusion_matrix(raw_objects)
+    intrinsic_diagnostics = compute_intrinsic_scene_diagnostics(
+        raw_objects,
+        image_b64,
+        width,
+        height,
+        req.fov_h_deg,
+        occlusion_matrix=occlusion_matrix,
+    )
 
     metrics = None
-    fov_sweep = None
+    fov_sweep = intrinsic_diagnostics["reference_free_fov_sweep"]
     if gt_raw is not None:
         metrics = evaluate_scene_predictions(raw_objects, gt_raw, width, height, req.fov_h_deg)
         fov_sweep = fov_sensitivity_sweep(raw_objects, gt_raw, width, height)
@@ -291,6 +302,7 @@ def analyze_scene(
         occlusion_matrix=occlusion_matrix,
         metrics=metrics,
         fov_sweep=fov_sweep,
+        intrinsic_diagnostics=intrinsic_diagnostics,
         latency_ms=latency_ms,
         usage=usage,
     )
@@ -310,10 +322,23 @@ def reproject_scene(req: ReprojectRequest) -> ReprojectResponse:
         else None
     )
     occlusion_matrix = compute_occlusion_matrix(raw_objects)
+    intrinsic_diagnostics = compute_intrinsic_scene_diagnostics(
+        raw_objects,
+        req.image_base64,
+        req.width,
+        req.height,
+        req.fov_h_deg,
+        occlusion_matrix=occlusion_matrix,
+    )
     metrics = (
         evaluate_scene_predictions(raw_objects, raw_gt, req.width, req.height, req.fov_h_deg)
         if raw_gt is not None
         else None
+    )
+    fov_sweep = (
+        fov_sensitivity_sweep(raw_objects, raw_gt, req.width, req.height)
+        if raw_gt is not None
+        else intrinsic_diagnostics["reference_free_fov_sweep"]
     )
     latency_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 
@@ -326,6 +351,8 @@ def reproject_scene(req: ReprojectRequest) -> ReprojectResponse:
         gt_objects=enriched_gt,
         occlusion_matrix=occlusion_matrix,
         metrics=metrics,
+        fov_sweep=fov_sweep,
+        intrinsic_diagnostics=intrinsic_diagnostics,
         latency_ms=latency_ms,
     )
 

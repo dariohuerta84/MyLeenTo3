@@ -13,6 +13,7 @@ from typing import Any, Optional
 from google import genai
 from PIL import Image
 
+from app.core.intrinsic_diagnostics import extract_image_adaptive_3d_hypotheses
 from app.schemas import DEFAULT_THINKING_LEVELS, RawDetectionList, SUPPORTED_MODELS
 
 SPATIAL_SYSTEM_INSTRUCTION = (
@@ -227,35 +228,52 @@ def build_deterministic_fallback_detections(
     model: str,
     thinking_level: str,
     max_objects: int = 10,
+    image_base64: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Generate deterministic fallback 3D hypotheses when analyzing custom images offline."""
-    candidates = [
-        {
-            "id": "fallback_1",
-            "label": "primary_subject",
-            "box_3d": [0.0, 2.35, -0.10, 0.62, 0.48, 0.52, 0.0, 0.0, 12.0],
-            "confidence": 0.84,
-        },
-        {
-            "id": "fallback_2",
-            "label": "left_reference_object",
-            "box_3d": [-0.72, 2.95, -0.18, 0.44, 0.38, 0.42, 0.0, 0.0, -18.0],
-            "confidence": 0.78,
-        },
-        {
-            "id": "fallback_3",
-            "label": "right_background_volume",
-            "box_3d": [0.78, 3.40, 0.05, 0.55, 0.50, 0.68, 0.0, 0.0, 25.0],
-            "confidence": 0.74,
-        },
-    ]
-    return {
-        "objects": candidates[:max_objects],
-        "scene_summary": (
+    """Generate image-adaptive deterministic 3D hypotheses when analyzing custom images offline."""
+    t0 = time.perf_counter()
+    if image_base64 and image_base64.strip():
+        candidates = extract_image_adaptive_3d_hypotheses(
+            image_base64=image_base64,
+            width=width,
+            height=height,
+            fov_h_deg=fov_h_deg,
+            max_objects=max_objects,
+        )
+        summary = (
+            f"Detección adaptativa por saliencia visual ({width}x{height}, FOV_h={fov_h_deg:.1f}°): "
+            f"{len(candidates)} regiones reproyectadas vía intrínseca K sin clave API."
+        )
+    else:
+        candidates = [
+            {
+                "id": "fallback_1",
+                "label": "primary_subject",
+                "box_3d": [0.0, 2.35, -0.10, 0.62, 0.48, 0.52, 0.0, 0.0, 12.0],
+                "confidence": 0.84,
+            },
+            {
+                "id": "fallback_2",
+                "label": "left_reference_object",
+                "box_3d": [-0.72, 2.95, -0.18, 0.44, 0.38, 0.42, 0.0, 0.0, -18.0],
+                "confidence": 0.78,
+            },
+            {
+                "id": "fallback_3",
+                "label": "right_background_volume",
+                "box_3d": [0.78, 3.40, 0.05, 0.55, 0.50, 0.68, 0.0, 0.0, 25.0],
+                "confidence": 0.74,
+            },
+        ]
+        summary = (
             f"Modo determinista offline ({width}x{height}, FOV_h={fov_h_deg:.1f}°): "
             "hipótesis 3D de referencia generadas localmente sin clave API de Google AI Studio."
-        ),
-        "latency_ms": 4.2,
+        )
+    latency_ms = max(1.2, round((time.perf_counter() - t0) * 1000.0, 2))
+    return {
+        "objects": candidates[:max_objects],
+        "scene_summary": summary,
+        "latency_ms": latency_ms,
         "usage": {
             "input_tokens": 0,
             "output_tokens": 0,

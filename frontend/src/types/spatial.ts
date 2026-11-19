@@ -100,6 +100,63 @@ export interface FovSweepPoint {
   mean_pixel_error: number;
 }
 
+export interface ImagePhotometricProfile {
+  luminance_mean: number;
+  luminance_std: number;
+  dark_shadow_ratio: number;
+  bloom_saturation_ratio: number;
+  spectral_entropy_bits: number;
+  perspective_coherence_score: number;
+  domain_classification:
+    | 'calibrated_studio'
+    | 'natural_indoor'
+    | 'high_contrast_stylized'
+    | 'low_light_high_stress'
+    | string;
+}
+
+export interface LatentIntrinsicMetrics {
+  physical_plausibility_score: number;
+  photometric_edge_coherence: number;
+  volume_interpenetration_index: number;
+  gravity_floating_anomaly_m: number;
+  support_plane_z_m: number;
+  scale_depth_ambiguity_score: number;
+  frustum_truncation_ratio: number;
+  mean_depth_uncertainty_m: number;
+}
+
+export interface PerObjectIntrinsicDiagnostic {
+  object_id: string;
+  label: string;
+  depth_m: number;
+  uncertainty_depth_m: number;
+  edge_alignment_score: number;
+  floating_gap_m: number;
+  anisotropy_ratio: number;
+  frustum_truncation_ratio: number;
+  occlusion_severity: number;
+  vulnerability_score: number;
+  dominant_weakness: string;
+}
+
+export interface ExploitedWeaknessEntry {
+  id: string;
+  title: string;
+  severity: 'low' | 'medium' | 'high' | string;
+  metric_value: string;
+  explanation: string;
+}
+
+export interface IntrinsicDiagnostics {
+  image_profile: ImagePhotometricProfile;
+  latent_metrics: LatentIntrinsicMetrics;
+  per_object_diagnostics: PerObjectIntrinsicDiagnostic[];
+  exploited_weaknesses: ExploitedWeaknessEntry[];
+  reference_free_fov_sweep: FovSweepPoint[];
+  estimated_optimal_fov_h_deg: number;
+}
+
 export interface BenchmarkScene {
   id: string;
   title: string;
@@ -132,6 +189,7 @@ export interface AnalyzeResponse {
   occlusion_matrix: OcclusionEntry[];
   metrics?: SceneMetrics | null;
   fov_sweep?: FovSweepPoint[] | null;
+  intrinsic_diagnostics?: IntrinsicDiagnostics | null;
   latency_ms: number;
   usage?: Record<string, unknown> | null;
   mode: string;
@@ -147,6 +205,8 @@ export interface ReprojectResponse {
   gt_objects?: SpatialObject[] | null;
   occlusion_matrix: OcclusionEntry[];
   metrics?: SceneMetrics | null;
+  fov_sweep?: FovSweepPoint[] | null;
+  intrinsic_diagnostics?: IntrinsicDiagnostics | null;
 }
 
 export interface PairwiseGeometry {

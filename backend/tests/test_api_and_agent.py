@@ -126,6 +126,12 @@ def test_analyze_custom_image_offline_fallback(monkeypatch: pytest.MonkeyPatch) 
     assert data["height"] == 320
     assert len(data["objects"]) >= 1
     assert data["metrics"] is None
+    assert data["fov_sweep"] is not None and len(data["fov_sweep"]) == 12
+    diag = data["intrinsic_diagnostics"]
+    assert diag is not None
+    assert "image_profile" in diag and "latent_metrics" in diag
+    assert len(diag["per_object_diagnostics"]) == len(data["objects"])
+    assert len(diag["exploited_weaknesses"]) >= 1
 
 
 def test_analyze_validation_errors() -> None:

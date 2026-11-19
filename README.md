@@ -143,8 +143,15 @@ Adicionalmente, el módulo **`Multi-Frame Geometric Consistency Audit`** (`world
 
 ## 6. Inicio Rápido (Quickstart)
 
-### Opción A: Desarrollo Local (`uv` / `venv` + `npm`)
+### Opción A: Desarrollo Local (`start_dev.sh` o `uv` + `npm`)
 
+#### Arranque unificado en un solo comando
+```bash
+./start_dev.sh
+```
+Inicia automáticamente el backend en `http://127.0.0.1:8085` y el frontend Vite en `http://127.0.0.1:5173`.
+
+#### Manual en dos terminales
 #### 1. Clonar y configurar variables de entorno (opcional)
 ```bash
 git clone https://github.com/dariohuerta84/MyLeenTo3.git
@@ -161,7 +168,7 @@ cd backend
 uv venv .venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8085
 ```
 *(Alternativa con `python -m venv .venv && .venv/bin/pip install -r requirements.txt`.)*
 
@@ -178,7 +185,7 @@ cd frontend
 npm install
 npm run dev
 ```
-Abre **`http://localhost:5173`** en tu navegador. El servidor de Vite redirige automáticamente `/api/*` hacia `http://127.0.0.1:8000`.
+Abre **`http://127.0.0.1:5173`** en tu navegador. El servidor de Vite redirige automáticamente `/api/*` hacia `http://127.0.0.1:8085` (o el valor de `VITE_API_TARGET`).
 
 ### Opción B: Despliegue Reproducible con Docker Compose
 

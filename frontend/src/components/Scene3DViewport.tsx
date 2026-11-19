@@ -171,8 +171,24 @@ const CameraFrustumAndFocalPlane: React.FC<{
   fovHDeg: number;
   fovVDeg: number;
   unfoldProgress: number;
-}> = ({ imageBase64, imageMime, fovHDeg, fovVDeg, unfoldProgress }) => {
+  cameraMode: CameraViewMode;
+}> = ({
+  imageBase64,
+  imageMime,
+  fovHDeg,
+  fovVDeg,
+  unfoldProgress,
+  cameraMode,
+}) => {
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const originMarkerRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (originMarkerRef.current) {
+      originMarkerRef.current.visible =
+        cameraMode !== 'camera_aligned' && state.camera.position.length() > 0.35;
+    }
+  });
 
   useEffect(() => {
     if (!imageBase64) {
@@ -216,29 +232,33 @@ const CameraFrustumAndFocalPlane: React.FC<{
   ];
 
   const planeOpacity = Math.max(0.22, 0.88 - unfoldProgress * 0.55);
+  const resolvedPlaneOpacity =
+    cameraMode === 'camera_aligned' ? 0.55 : planeOpacity;
 
   return (
     <group>
-      {/* Camera origin marker */}
-      <mesh position={[0, 0, 0]}>
-        <sphereGeometry args={[0.04, 16, 16]} />
-        <meshStandardMaterial color="#111827" roughness={0.4} />
-      </mesh>
+      {/* Camera origin marker + rays hidden when near (0,0,0) or camera_aligned */}
+      <group ref={originMarkerRef} visible={cameraMode !== 'camera_aligned'}>
+        <mesh position={[0, 0, 0]}>
+          <sphereGeometry args={[0.04, 16, 16]} />
+          <meshStandardMaterial color="#111827" roughness={0.4} />
+        </mesh>
 
-      {/* Frustum edges from origin to focal plane corners */}
-      {corners.map((c, idx) => (
-        <Line
-          key={`ray-${idx}`}
-          points={[
-            [0, 0, 0],
-            c,
-          ]}
-          color="#64748B"
-          lineWidth={1.1}
-          transparent
-          opacity={0.75}
-        />
-      ))}
+        {/* Frustum edges from origin to focal plane corners */}
+        {corners.map((c, idx) => (
+          <Line
+            key={`ray-${idx}`}
+            points={[
+              [0, 0, 0],
+              c,
+            ]}
+            color="#64748B"
+            lineWidth={1.1}
+            transparent
+            opacity={0.75}
+          />
+        ))}
+      </group>
 
       {/* Focal plane perimeter */}
       <Line
@@ -251,12 +271,12 @@ const CameraFrustumAndFocalPlane: React.FC<{
 
       {/* Textured RGB focal plane */}
       {texture && (
-        <mesh position={[0, 0, -depth]}>
+        <mesh position={[0, 0, -depth]} renderOrder={-1}>
           <planeGeometry args={[halfW * 2, halfH * 2]} />
           <meshBasicMaterial
             map={texture}
             transparent
-            opacity={planeOpacity}
+            opacity={resolvedPlaneOpacity}
             side={THREE.DoubleSide}
             depthWrite={false}
           />
@@ -273,6 +293,7 @@ const CanvasSpriteLabel: React.FC<{
   borderColor?: string;
   backgroundColor?: string;
   worldHeight?: number;
+  depthTest?: boolean;
 }> = ({
   position,
   lines,
@@ -280,6 +301,7 @@ const CanvasSpriteLabel: React.FC<{
   borderColor = '#E2E5EA',
   backgroundColor = 'rgba(255, 255, 255, 0.94)',
   worldHeight = 0.22,
+  depthTest = false,
 }) => {
   const { texture, aspect } = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -367,14 +389,16 @@ const CanvasSpriteLabel: React.FC<{
       <spriteMaterial
         map={texture}
         transparent
-        depthTest={false}
+        depthTest={depthTest}
         depthWrite={false}
       />
     </sprite>
   );
 };
 
-const MetricOpticalBenchFloor: React.FC = () => {
+const MetricOpticalBenchFloor: React.FC<{ cameraMode: CameraViewMode }> = ({
+  cameraMode,
+}) => {
   const rings = [1, 2, 3, 4, 5, 6];
 
   const ringPointsList = useMemo(() => {
@@ -411,14 +435,17 @@ const MetricOpticalBenchFloor: React.FC = () => {
             transparent
             opacity={0.75}
           />
-          <CanvasSpriteLabel
-            position={[0.16, -0.52, -r]}
-            lines={[`${r}m`]}
-            accentColor="#4B5563"
-            borderColor="#CBD5E1"
-            backgroundColor="rgba(240, 242, 245, 0.9)"
-            worldHeight={0.15}
-          />
+          {cameraMode !== 'camera_aligned' && (
+            <CanvasSpriteLabel
+              position={[r * 0.45, -0.56, -r * 0.89]}
+              lines={[`${r}m`]}
+              accentColor="#4B5563"
+              borderColor="#CBD5E1"
+              backgroundColor="rgba(240, 242, 245, 0.9)"
+              worldHeight={0.11}
+              depthTest
+            />
+          )}
         </group>
       ))}
     </group>
@@ -890,7 +917,7 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
             transitionNonce={transitionNonce}
           />
 
-          <MetricOpticalBenchFloor />
+          <MetricOpticalBenchFloor cameraMode={cameraMode} />
 
           <CameraFrustumAndFocalPlane
             imageBase64={imageBase64}
@@ -898,6 +925,7 @@ export const Scene3DViewport: React.FC<Scene3DViewportProps> = ({
             fovHDeg={fovHDeg}
             fovVDeg={fovVDeg}
             unfoldProgress={unfoldProgress}
+            cameraMode={cameraMode}
           />
 
           {/* Predicted OBBs */}

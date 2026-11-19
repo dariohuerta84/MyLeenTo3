@@ -33,6 +33,10 @@ from app.core.geometry_3d import (
     quaternion_to_rotation_matrix,
     rotation_matrix_to_quaternion,
 )
+from app.core.intrinsic_diagnostics import (
+    compute_intrinsic_scene_diagnostics,
+    extract_image_adaptive_3d_hypotheses,
+)
 from app.core.metrics import (
     evaluate_scene_predictions,
     fov_sensitivity_sweep,
@@ -389,3 +393,52 @@ def test_multiframe_audit_demo_and_static_stability() -> None:
     assert static_audit["geometric_stability_score"] == 100.0
     assert static_audit["mean_scale_drift_pct"] == 0.0
     assert static_audit["mean_yaw_jitter_deg"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 6. Universal Reference-Free Intrinsic Diagnostics & Salience Hypotheses
+# ---------------------------------------------------------------------------
+
+
+def test_intrinsic_diagnostics_photometric_stress_and_physical_anomalies() -> None:
+    # Build a dark stylized image with a bright high-contrast central subject
+    arr = np.zeros((160, 240, 3), dtype=np.uint8)
+    arr[:, :] = [10, 12, 18]  # deep dark background
+    arr[45:125, 95:145] = [245, 250, 255]  # bright bloom subject
+    buf = io.BytesIO()
+    Image.fromarray(arr, mode="RGB").save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    # Test image-adaptive 3D hypothesis extraction from real pixels
+    hyps = extract_image_adaptive_3d_hypotheses(b64, 240, 160, 60.0, max_objects=4)
+    assert len(hyps) >= 1
+    for h in hyps:
+        assert len(h["box_3d"]) == 9
+        assert h["box_3d"][1] > 0.5  # positive depth
+
+    # Test physical weakness detection: overlapping + floating + pancake boxes
+    stressed_objects = [
+        {"id": "o1", "label": "floor_block", "box_3d": [0.0, 2.5, -0.4, 0.8, 0.8, 0.8, 0.0, 0.0, 0.0]},
+        {"id": "o2", "label": "colliding_floater", "box_3d": [0.1, 2.5, 0.2, 0.9, 0.4, 0.9, 12.0, -8.0, 20.0]},
+        {"id": "o3", "label": "far_giant", "box_3d": [0.4, 5.5, 0.2, 2.5, 2.2, 0.3, 0.0, 0.0, 0.0]},
+    ]
+    diag = compute_intrinsic_scene_diagnostics(stressed_objects, b64, 240, 160, 60.0)
+
+    assert diag["image_profile"]["domain_classification"] == "high_contrast_stylized"
+    assert diag["image_profile"]["dark_shadow_ratio"] > 0.7
+    assert diag["image_profile"]["bloom_saturation_ratio"] > 0.05
+
+    lat = diag["latent_metrics"]
+    assert 0.0 <= lat["physical_plausibility_score"] <= 100.0
+    assert lat["volume_interpenetration_index"] > 0.01  # o1 and o2 overlap in 3D
+    assert lat["gravity_floating_anomaly_m"] > 0.3  # o2 floats well above o1
+    assert lat["scale_depth_ambiguity_score"] > 0.4
+    assert lat["mean_depth_uncertainty_m"] > 0.1
+    assert len(diag["per_object_diagnostics"]) == 3
+    assert len(diag["reference_free_fov_sweep"]) == 12
+    assert any(w["id"] in ("photometric_stress", "solid_interpenetration", "gravity_floating") for w in diag["exploited_weaknesses"])
+
+    # Empty scene edge case
+    empty_diag = compute_intrinsic_scene_diagnostics([], b64, 240, 160, 60.0)
+    assert empty_diag["latent_metrics"]["physical_plausibility_score"] == 0.0
+    assert len(empty_diag["per_object_diagnostics"]) == 0

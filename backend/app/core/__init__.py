@@ -18,6 +18,10 @@ from .geometry_3d import (
     quaternion_to_rotation_matrix,
     rotation_matrix_to_quaternion,
 )
+from .intrinsic_diagnostics import (
+    compute_intrinsic_scene_diagnostics,
+    extract_image_adaptive_3d_hypotheses,
+)
 from .metrics import (
     DEFAULT_FOV_SWEEP_VALUES,
     evaluate_scene_predictions,
@@ -51,10 +55,12 @@ __all__ = [
     "compute_bev_iou",
     "compute_box_2d_iou",
     "compute_fov_v_deg",
+    "compute_intrinsic_scene_diagnostics",
     "compute_occlusion_matrix",
     "compute_pairwise_geometry",
     "euler_deg_to_quaternion",
     "evaluate_scene_predictions",
+    "extract_image_adaptive_3d_hypotheses",
     "fov_sensitivity_sweep",
     "gemini_to_threejs_pose",
     "get_benchmark",

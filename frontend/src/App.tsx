@@ -5,6 +5,7 @@ import type {
   CameraViewMode,
   FovSweepPoint,
   GeminiModelId,
+  IntrinsicDiagnostics,
   MeasurementState,
   OcclusionEntry,
   SceneAction,
@@ -59,6 +60,8 @@ export function App() {
   const [occlusionMatrix, setOcclusionMatrix] = useState<OcclusionEntry[]>([]);
   const [metrics, setMetrics] = useState<SceneMetrics | null>(null);
   const [fovSweep, setFovSweep] = useState<FovSweepPoint[] | null>(null);
+  const [intrinsicDiagnostics, setIntrinsicDiagnostics] =
+    useState<IntrinsicDiagnostics | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [modeBadge, setModeBadge] = useState<string>('calibrated_demo');
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,6 +83,7 @@ export function App() {
   const reprojectSeqRef = useRef<number>(0);
   const objectsRef = useRef<SpatialObject[]>([]);
   const gtObjectsRef = useRef<SpatialObject[] | null>(null);
+  const imageBase64Ref = useRef<string>('');
 
   useEffect(() => {
     objectsRef.current = objects;
@@ -88,6 +92,10 @@ export function App() {
   useEffect(() => {
     gtObjectsRef.current = gtObjects;
   }, [gtObjects]);
+
+  useEffect(() => {
+    imageBase64Ref.current = imageBase64;
+  }, [imageBase64]);
 
   const navigateTo = useCallback((section: AppSection) => {
     runViewTransition(() => {
@@ -141,6 +149,7 @@ export function App() {
         setOcclusionMatrix(res.occlusion_matrix ?? []);
         setMetrics(res.metrics ?? null);
         setFovSweep(res.fov_sweep ?? null);
+        setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
         setModeBadge(res.mode ?? 'calibrated_demo');
         setNotice(res.notice ?? null);
         if (target.id === 'occlusion_corridor') {
@@ -245,6 +254,7 @@ export function App() {
           setOcclusionMatrix(res.occlusion_matrix ?? []);
           setMetrics(res.metrics ?? null);
           setFovSweep(res.fov_sweep ?? null);
+          setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
           setModeBadge(res.mode ?? 'calibrated_demo');
           setNotice(res.notice ?? null);
         } catch (err) {
@@ -294,6 +304,7 @@ export function App() {
       setOcclusionMatrix(res.occlusion_matrix ?? []);
       setMetrics(res.metrics ?? null);
       setFovSweep(res.fov_sweep ?? null);
+      setIntrinsicDiagnostics(res.intrinsic_diagnostics ?? null);
       setModeBadge(res.mode ?? 'live');
       setNotice(res.notice ?? null);
     } catch (err) {
@@ -314,6 +325,7 @@ export function App() {
       reprojectScene({
         objects: currentObjects,
         gt_objects: gtObjectsRef.current,
+        image_base64: imageBase64Ref.current || undefined,
         width,
         height,
         fov_h_deg: nextFov,
@@ -327,6 +339,12 @@ export function App() {
           setOcclusionMatrix(res.occlusion_matrix ?? []);
           if (res.metrics !== undefined) {
             setMetrics(res.metrics);
+          }
+          if (res.fov_sweep !== undefined) {
+            setFovSweep(res.fov_sweep);
+          }
+          if (res.intrinsic_diagnostics !== undefined) {
+            setIntrinsicDiagnostics(res.intrinsic_diagnostics);
           }
         })
         .catch(() => {
@@ -541,6 +559,7 @@ export function App() {
             objects={objects}
             metrics={metrics}
             fovSweep={fovSweep}
+            intrinsicDiagnostics={intrinsicDiagnostics}
             occlusionMatrix={occlusionMatrix}
             apiKey={apiKey}
             onFocusObjectInLab={handleFocusObjectInLab}

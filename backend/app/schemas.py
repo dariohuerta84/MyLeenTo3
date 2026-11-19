@@ -147,6 +147,7 @@ class AnalyzeResponse(BaseModel):
     occlusion_matrix: list[dict[str, Any]]
     metrics: Optional[dict[str, Any]] = None
     fov_sweep: Optional[list[dict[str, Any]]] = None
+    intrinsic_diagnostics: Optional[dict[str, Any]] = None
     latency_ms: float
     usage: dict[str, Any]
 
@@ -154,6 +155,7 @@ class AnalyzeResponse(BaseModel):
 class ReprojectRequest(BaseModel):
     objects: list[ObjectInput]
     gt_objects: Optional[list[ObjectInput]] = None
+    image_base64: Optional[str] = None
     width: int = Field(..., gt=0)
     height: int = Field(..., gt=0)
     fov_h_deg: float = Field(..., ge=20.0, le=140.0)
@@ -168,6 +170,8 @@ class ReprojectResponse(BaseModel):
     gt_objects: Optional[list[EnrichedObject]] = None
     occlusion_matrix: list[dict[str, Any]]
     metrics: Optional[dict[str, Any]] = None
+    fov_sweep: Optional[list[dict[str, Any]]] = None
+    intrinsic_diagnostics: Optional[dict[str, Any]] = None
     latency_ms: float
 
 

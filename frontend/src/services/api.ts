@@ -88,6 +88,7 @@ export async function analyzeScene(
 export interface ReprojectPayload {
   objects: SpatialObject[];
   gt_objects?: SpatialObject[] | null;
+  image_base64?: string | null;
   width: number;
   height: number;
   fov_h_deg: number;

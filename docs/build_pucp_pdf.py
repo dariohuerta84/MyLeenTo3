@@ -33,6 +33,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.geometry_3d import compute_fov_v_deg, compute_occlusion_matrix
+from app.core.intrinsic_diagnostics import compute_intrinsic_scene_diagnostics
 from app.core.metrics import evaluate_scene_predictions, fov_sensitivity_sweep
 from app.core.multiframe_audit import (
     audit_multiframe_consistency,
@@ -187,6 +188,34 @@ def collect_real_experiment_data() -> dict[str, Any]:
     mf_seq = get_demo_multiframe_sequence()
     mf_audit = audit_multiframe_consistency(mf_seq["frames"])
 
+    intrinsic_rows: list[dict[str, Any]] = []
+    for bm in benchmarks:
+        bm_id = bm["id"]
+        preds_h, _ = _extract_pred_list(bm["demo_predictions_by_model"]["gemini-4-hydrogen"])
+        occ_h = compute_occlusion_matrix(preds_h)
+        diag_h = compute_intrinsic_scene_diagnostics(
+            preds_h,
+            bm["image_base64"],
+            int(bm["width"]),
+            int(bm["height"]),
+            float(bm["fov_h_deg"]),
+            occlusion_matrix=occ_h,
+        )
+        lat = diag_h["latent_metrics"]
+        prof = diag_h["image_profile"]
+        intrinsic_rows.append(
+            {
+                "benchmark_short": BENCHMARK_SHORT_NAMES.get(bm_id, bm_id),
+                "domain": prof["domain_classification"],
+                "plausibility": lat["physical_plausibility_score"],
+                "pecs": lat["photometric_edge_coherence"],
+                "pvi": lat["volume_interpenetration_index"],
+                "gfi": lat["gravity_floating_anomaly_m"],
+                "sdas": lat["scale_depth_ambiguity_score"],
+                "ofi": lat["mean_depth_uncertainty_m"],
+            }
+        )
+
     return {
         "scenes": scene_meta,
         "per_scene_rows": per_scene_rows,
@@ -195,6 +224,7 @@ def collect_real_experiment_data() -> dict[str, Any]:
         "fov_sweep_label": fov_sweep_scene_title,
         "multiframe_seq": mf_seq,
         "multiframe_audit": mf_audit,
+        "intrinsic_rows": intrinsic_rows,
     }
 
 
@@ -391,6 +421,10 @@ def write_markdown_report(data: dict[str, Any]) -> None:
     scenes = data["scenes"]
     fov_sweep = data["fov_sweep"]
     mf = data["multiframe_audit"]
+    intr_rows = data["intrinsic_rows"]
+    mean_plaus = statistics.mean(r["plausibility"] for r in intr_rows)
+    mean_pecs = statistics.mean(r["pecs"] for r in intr_rows)
+    mean_ofi = statistics.mean(r["ofi"] for r in intr_rows)
 
     best_fov = max(fov_sweep, key=lambda x: x["reproj_iou_2d"])
     worst_fov = min(fov_sweep, key=lambda x: x["reproj_iou_2d"])
@@ -535,6 +569,10 @@ def build_html_document(data: dict[str, Any]) -> str:
     scenes = data["scenes"]
     fov_sweep = data["fov_sweep"]
     mf = data["multiframe_audit"]
+    intr_rows = data["intrinsic_rows"]
+    mean_plaus = statistics.mean(r["plausibility"] for r in intr_rows)
+    mean_pecs = statistics.mean(r["pecs"] for r in intr_rows)
+    mean_ofi = statistics.mean(r["ofi"] for r in intr_rows)
 
     h_agg = agg[0]
     a_agg = agg[1]
@@ -1222,9 +1260,13 @@ def build_html_document(data: dict[str, Any]) -> str:
     <figcaption><strong>Figura 2.</strong> Resultados computados directamente con <span class="mono">SEED = 42</span>. <strong>(A)</strong> Barrido de sensibilidad al <span class="mono">FOV_h</span> ({html.escape(data['fov_sweep_label'])}): el máximo de reproyección 2D ocurre exactamente en el <span class="mono">FOV_h</span> calibrado de <span class="mono">{best_fov['fov_h_deg']}&deg;</span> (<span class="mono">IoU 2D = {best_fov['reproj_iou_2d']:.3f}</span>, error <span class="mono">{best_fov['mean_pixel_error']:.2f} px</span>), degradándose hasta <span class="mono">{worst_fov['reproj_iou_2d']:.3f}</span> (<span class="mono">{worst_fov['mean_pixel_error']:.1f} px</span>) en <span class="mono">{worst_fov['fov_h_deg']}&deg;</span>. <strong>(B)</strong> Desglose por objeto de la auditoría multi-frame (<span class="mono">{html.escape(str(mf['sequence_id']))}</span>, {mf['frame_count']} cuadros): puntaje global de estabilidad de <strong>{mf['geometric_stability_score']:.1f}/100</strong>.</figcaption>
   </figure>
 
-  <div class="two-col">
-    <div>
-      <h3>Hallazgos Cuantitativos Clave</h3>
+    <div class="callout">
+      <strong>Métricas Intrínsecas Sin Referencia (Imágenes <em>In-the-Wild</em> sin Ground Truth):</strong> Mediante <span class="code-inline">intrinsic_diagnostics.py</span>, MyLeenTo3 audita cualquier fotografía o render sin anotaciones 3D midiendo 6 variables latentes: coherencia fotométrica Sobel (<span class="mono">PECS={mean_pecs:.3f}</span> medio), interpenetración sólida SAT (<span class="mono">PVI</span>), anomalía gravitatoria respecto al plano soporte (<span class="mono">GFI</span>), acoplamiento escala–profundidad (<span class="mono">SDAS</span>), truncamiento de <em>frustum</em> (<span class="mono">FBR</span>) e incertidumbre cuadrática de rango (<span class="mono">&sigma;<sub>y</sub>=&plusmn;{mean_ofi:.3f} m</span>), sintetizadas en un índice de plausibilidad física (<span class="mono">{mean_plaus:.1f}/100</span>).
+    </div>
+
+    <div class="two-col">
+      <div>
+        <h3>Hallazgos Cuantitativos Clave</h3>
       <ul>
         <li><strong>Escala de razonamiento vs. precisión 3D:</strong> <span class="code-inline">gemini-4-hydrogen</span> supera consistentemente en las 3 escenas (<span class="mono">mIoU_3D = {h_agg['mIoU_3D']:.3f}</span>, <span class="mono">ATE = {h_agg['ate_m']:.3f} m</span>) frente a <span class="code-inline">gemini-4-argon</span> (<span class="mono">{a_agg['mIoU_3D']:.3f}</span>, <span class="mono">{a_agg['ate_m']:.3f} m</span>) y <span class="code-inline">gemini-3.5-flash-lite</span> (<span class="mono">{l_agg['mIoU_3D']:.3f}</span>, <span class="mono">{l_agg['ate_m']:.3f} m</span>), con mayor brecha en <em>Occlusion Corridor</em> y <em>Rotated Workshop</em>.</li>
         <li><strong>Impacto de la calibración intrínseca:</strong> una desviación de <span class="mono">{abs(worst_fov['fov_h_deg'] - best_fov['fov_h_deg'])}&deg;</span> en <span class="code-inline">FOV_h</span> reduce el IoU 2D reproyectado en <span class="mono">{(best_fov['reproj_iou_2d'] - worst_fov['reproj_iou_2d'])*100:.1f}</span> puntos porcentuales sin alterar los pesos del VLM, demostrando que el recálculo interactivo vía <span class="code-inline">/api/reproject</span> (&lt;10 ms) es crítico para análisis forense.</li>
