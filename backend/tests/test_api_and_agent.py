@@ -557,8 +557,10 @@ def test_copilot_live_multiturn_function_calling_loop() -> None:
     assert call2_kw["previous_interaction_id"] == "int_turn_1"
     for kw in (call1_kw, call2_kw):
         assert kw["model"] == "gemini-4-hydrogen"
-        assert "tools" in kw and len(kw["tools"]) == 8
-        assert "generate_domain_diagnosis" in {t["name"] for t in kw["tools"]}
+        assert "tools" in kw and len(kw["tools"]) == 9
+        tool_names_live = {t["name"] for t in kw["tools"]}
+        assert "generate_domain_diagnosis" in tool_names_live
+        assert "optimize_scene_qubo_mwis" in tool_names_live
         assert "system_instruction" in kw
         assert kw["generation_config"]["thinking_level"] == "high"
 

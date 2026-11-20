@@ -1040,7 +1040,7 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
 
             <div data-scroll-anim="curtain-up" className="scroll-curtain-up mt-10 flex flex-wrap items-center justify-between gap-4">
               <span className="font-mono-tech text-xs text-[#15284B]">
-                Reconstrucción local en vivo + 8 herramientas espaciales + Reconstrucción 360°
+                Reconstrucción local en vivo + 9 herramientas espaciales + QUBO-MWIS 360°
               </span>
               <div className="flex flex-wrap items-center gap-3">
                 <a
@@ -1323,14 +1323,34 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({
 
                 <div className="border-l-2 border-[#B45309] py-5 pl-4">
                   <div className="font-mono-tech text-[11px] uppercase tracking-wider text-[#B45309]">
-                    03 — Reconstrucción 360° Fase 3 y Copiloto 8 Funciones
+                    03 — Reconstrucción 360° Fase 3 y Copiloto 9 Funciones
                   </div>
                   <h3 className="font-serif-editorial mt-1 text-xl text-[#111827]">
                     Registro SIFT + Sim(3) Umeyama + ICP y ActivePose NBV
                   </h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-[#4B5563]">
-                    Une 2 a 6 vistas en volumen sólido tomográfico / ConvexHull 360° con guía polar de zonas ciegas, junto al copiloto inteligente con 8 funciones geométricas auditables.
+                    Une 2 a 6 vistas en volumen sólido tomográfico / ConvexHull 360° con guía polar de zonas ciegas, junto al copiloto inteligente con 9 funciones geométricas auditables.
                   </p>
+                </div>
+
+                <div className="border-l-2 border-[#9F1239] py-5 pl-4">
+                  <div className="font-mono-tech text-[11px] uppercase tracking-wider text-[#9F1239]">
+                    04 — Motor Combinatorio QUBO-MWIS Fase 4 (Harvard HQI)
+                  </div>
+                  <h3 className="font-serif-editorial mt-1 text-xl text-[#111827]">
+                    Bifurcación Simulada, NMS 3D Rydberg y Puente QuEra Aquila
+                  </h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-[#4B5563]">
+                    Resuelve registro isométrico 3D anti-simetría, supresión de colisiones SAT 15-ejes y planificación multi-disparo NBV (<em>Classical Shadows</em>) con exportación BQM / AWS Braket.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('quantum')}
+                    className="mt-2 inline-flex items-center gap-1 border-b border-[#9F1239]/40 pb-0.5 text-xs font-medium text-[#9F1239] transition-colors hover:border-[#9F1239]"
+                  >
+                    <span>Explorar Optimizador QUBO</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
             </div>

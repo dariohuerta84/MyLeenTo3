@@ -177,10 +177,13 @@ def _lookup_3d_median(
 def _match_sift_3d_correspondences(
     src_frame: dict[str, Any],
     dst_frame: dict[str, Any],
-) -> tuple[np.ndarray, np.ndarray]:
+    *,
+    return_weights: bool = False,
+) -> Any:
     """Find 3D-3D correspondences using shared ArUco corners plus SIFT Lowe-ratio matches."""
     src_list: list[np.ndarray] = []
     dst_list: list[np.ndarray] = []
+    w_list: list[float] = []
 
     src_pts_map = np.asarray(src_frame["points_cv"], dtype=np.float32)
     dst_pts_map = np.asarray(dst_frame["points_cv"], dtype=np.float32)
@@ -204,9 +207,14 @@ def _match_sift_3d_correspondences(
                 pa = _lookup_3d_median(src_pts_map, src_valid, float(ca[0]), float(ca[1]), radius=2)
                 pb = _lookup_3d_median(dst_pts_map, dst_valid, float(cb[0]), float(cb[1]), radius=2)
                 if pa is not None and pb is not None:
-                    # Weight fiducial corners mildly higher for RANSAC stability
-                    src_list.extend([pa, pa])
-                    dst_list.extend([pb, pb])
+                    if return_weights:
+                        src_list.append(pa)
+                        dst_list.append(pb)
+                        w_list.append(2.5)
+                    else:
+                        # Weight fiducial corners mildly higher for RANSAC stability
+                        src_list.extend([pa, pa])
+                        dst_list.extend([pb, pb])
 
     # 2. SIFT + BFMatcher knn Lowe ratio test lifted to metric 3D
     if cv2 is not None and hasattr(cv2, "SIFT_create"):
@@ -222,7 +230,8 @@ def _match_sift_3d_correspondences(
                 if len(pair) < 2:
                     continue
                 m, n = pair[0], pair[1]
-                if m.distance >= 0.76 * n.distance:
+                ratio = float(m.distance) / max(float(n.distance), 1e-6)
+                if ratio >= 0.76:
                     continue
                 ua, va = kp_a[m.queryIdx].pt
                 ub, vb = kp_b[m.trainIdx].pt
@@ -231,10 +240,20 @@ def _match_sift_3d_correspondences(
                 if pa is not None and pb is not None:
                     src_list.append(pa)
                     dst_list.append(pb)
+                    w_list.append(float(np.clip(0.5 + (1.0 - ratio), 0.55, 1.5)))
 
     if not src_list:
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
-    return np.asarray(src_list, dtype=np.float64), np.asarray(dst_list, dtype=np.float64)
+        empty_pts = np.zeros((0, 3), dtype=np.float64)
+        empty_dst = np.zeros((0, 3), dtype=np.float64)
+        if return_weights:
+            return empty_pts, empty_dst, np.zeros(0, dtype=np.float64)
+        return empty_pts, empty_dst
+
+    src_arr = np.asarray(src_list, dtype=np.float64)
+    dst_arr = np.asarray(dst_list, dtype=np.float64)
+    if return_weights:
+        return src_arr, dst_arr, np.asarray(w_list, dtype=np.float64)
+    return src_arr, dst_arr
 
 
 def ransac_sim3(
@@ -782,6 +801,7 @@ def compute_360_coverage_and_nbv(
     target_center_three: np.ndarray,
     *,
     up_axis_three: Optional[np.ndarray] = None,
+    body_normals_three: Optional[np.ndarray] = None,
 ) -> dict[str, Any]:
     """Compute 12-sector (30-deg) 360-degree polar coverage anchored on the horizontal object plane."""
     sector_scores = [0.0] * 12
@@ -866,6 +886,15 @@ def compute_360_coverage_and_nbv(
             f"ActivePose NBV recomienda capturar la siguiente foto desde {rec_az_deg:.0f}° de azimut."
         )
 
+    from app.core.quantum_qubo import plan_nbv_set_cover_qubo
+
+    qubo_nbv_plan = plan_nbv_set_cover_qubo(
+        sector_scores,
+        body_normals_three=body_normals_three,
+        existing_azimuths_deg=camera_az_list,
+        include_hardware_export=False,
+    )
+
     return {
         "sector_scores": sector_scores,
         "angular_coverage_pct": coverage_pct,
@@ -873,6 +902,7 @@ def compute_360_coverage_and_nbv(
         "recommended_next_azimuth_deg": rec_az_deg,
         "is_watertight_360": coverage_pct >= 80.0 and len(camera_poses) >= 3,
         "next_best_view_advice_es": advice,
+        "qubo_nbv_plan": qubo_nbv_plan,
     }
 
 
@@ -883,8 +913,11 @@ def fuse_multiview_frames(
     max_points: int = 96000,
     allow_scale_alignment: bool = True,
     gt_volume_m3: Optional[float] = None,
+    use_qubo_registration: bool = True,
 ) -> dict[str, Any]:
     """Register N orbital RGB-D frames into canonical world coordinates and fuse 360 surfels/mesh."""
+    from app.core.quantum_qubo import plan_nbv_set_cover_qubo, qubo_mwis_sim3_registration
+
     if not frames:
         raise ValueError("At least 1 frame is required for multi-view fusion.")
 
@@ -926,13 +959,24 @@ def fuse_multiview_frames(
         sv_ext = np.percentile(anchor_pts, 98, axis=0) - np.percentile(anchor_pts, 2, axis=0)
         single_view_obb_vol = float(max(sv_ext[0], 0.01) * max(sv_ext[1], 0.01) * max(sv_ext[2], 0.01))
 
+    qubo_pair_logs: list[dict[str, Any]] = []
+    views_optimized_by_qubo = 0
+    best_hw_pair_args: Optional[tuple[np.ndarray, np.ndarray, np.ndarray, int, int, int]] = None
+
     for k in range(1, n_views):
         src_pts_k, src_nrm_k = view_clouds[k]
         yaw_hint = frames[k].get("yaw_hint_deg")
 
-        best_pair: Optional[tuple[int, np.ndarray, np.ndarray, float, int]] = None
+        best_pair: Optional[tuple[int, np.ndarray, np.ndarray, float, int, Optional[dict[str, Any]]]] = None
+        best_corr_tuple: Optional[tuple[np.ndarray, np.ndarray, np.ndarray, int]] = None
+
         for j in range(k):
-            corr_s, corr_d = _match_sift_3d_correspondences(frames[k], frames[j])
+            if use_qubo_registration:
+                corr_s, corr_d, corr_w = _match_sift_3d_correspondences(frames[k], frames[j], return_weights=True)
+            else:
+                corr_s, corr_d = _match_sift_3d_correspondences(frames[k], frames[j], return_weights=False)
+                corr_w = np.ones(corr_s.shape[0], dtype=np.float64)
+
             shared_aruco = bool(
                 (frames[k].get("aruco_anchor") or {}).get("detected")
                 and (frames[j].get("aruco_anchor") or {}).get("detected")
@@ -942,19 +986,37 @@ def fuse_multiview_frames(
             min_corr = 6 if shared_aruco else 12
             min_inl = 4 if shared_aruco else 9
             if corr_s.shape[0] >= min_corr:
-                R_jk, t_jk, s_jk, inl_cnt = ransac_sim3(
-                    corr_s,
-                    corr_d,
-                    allow_scale_alignment=allow_scale_alignment,
-                    inlier_thresh_m=0.04,
-                    seed=42 + k * 7 + j,
-                )
-                if inl_cnt >= min_inl:
-                    if best_pair is None or inl_cnt > best_pair[4]:
-                        best_pair = (j, R_jk, t_jk, s_jk, inl_cnt)
+                pair_seed = 42 + k * 7 + j
+                if use_qubo_registration:
+                    qubo_res = qubo_mwis_sim3_registration(
+                        corr_s,
+                        corr_d,
+                        weights=corr_w,
+                        allow_scale_alignment=allow_scale_alignment,
+                        inlier_thresh_m=0.04,
+                        seed=pair_seed,
+                        include_hardware_export=False,
+                    )
+                    R_jk = qubo_res["R"]
+                    t_jk = qubo_res["t"]
+                    s_jk = float(qubo_res["scale"])
+                    inl_cnt = int(qubo_res["inliers"])
+                    if inl_cnt >= min_inl and (best_pair is None or inl_cnt > best_pair[4]):
+                        best_pair = (j, R_jk, t_jk, s_jk, inl_cnt, qubo_res)
+                        best_corr_tuple = (corr_s, corr_d, corr_w, pair_seed)
+                else:
+                    R_jk, t_jk, s_jk, inl_cnt = ransac_sim3(
+                        corr_s,
+                        corr_d,
+                        allow_scale_alignment=allow_scale_alignment,
+                        inlier_thresh_m=0.04,
+                        seed=pair_seed,
+                    )
+                    if inl_cnt >= min_inl and (best_pair is None or inl_cnt > best_pair[4]):
+                        best_pair = (j, R_jk, t_jk, s_jk, inl_cnt, None)
 
         if best_pair is not None and world_pts_acc.shape[0] >= 16 and src_pts_k.shape[0] >= 16:
-            j, R_jk, t_jk, s_jk, inl_cnt = best_pair
+            j, R_jk, t_jk, s_jk, inl_cnt, win_qubo = best_pair
             # Compose T_{0<-k} = T_{0<-j} o T_{j<-k}
             s_init = float(np.clip(s_list[j] * s_jk, _SIM3_SCALE_MIN, _SIM3_SCALE_MAX))
             R_init = _ensure_proper_rotation(R_list[j] @ R_jk)
@@ -970,8 +1032,56 @@ def fuse_multiview_frames(
                 s_init,
                 max_corr_dist_m=0.075,
             )
-            method = "sift_aruco_sim3_icp" if (frames[k].get("aruco_anchor") or {}).get("detected") else "sift_sim3_icp"
+            has_aruco_k = bool((frames[k].get("aruco_anchor") or {}).get("detected"))
+            if win_qubo is not None and win_qubo.get("method_won") == "qubo_mwis":
+                method = "qubo_mwis_aruco_sim3_icp" if has_aruco_k else "qubo_mwis_sim3_icp"
+            else:
+                method = "sift_aruco_sim3_icp" if has_aruco_k else "sift_sim3_icp"
+
+            if win_qubo is not None:
+                qubo_pair_logs.append(
+                    {
+                        "view_index": k,
+                        "anchor_index": j,
+                        "method_won": str(win_qubo["method_won"]),
+                        "n_vars": int(win_qubo["n_vars"]),
+                        "n_conflict_edges": int(win_qubo["n_conflict_edges"]),
+                        "qubo_inliers": int(win_qubo["qubo_inliers"]),
+                        "ransac_inliers": int(win_qubo["ransac_inliers"]),
+                        "energy_gain": float(win_qubo["energy_gain"]),
+                        "solver_ms": float(win_qubo["solver_ms"]),
+                    }
+                )
+                if best_corr_tuple is not None and (
+                    best_hw_pair_args is None or int(win_qubo["n_vars"]) > best_hw_pair_args[5]
+                ):
+                    best_hw_pair_args = (
+                        best_corr_tuple[0],
+                        best_corr_tuple[1],
+                        best_corr_tuple[2],
+                        best_corr_tuple[3],
+                        k,
+                        int(win_qubo["n_vars"]),
+                    )
             inliers_rep = inl_cnt
+            # Guard against degenerate sparse correspondences: verify dense ICP overlap & RMSE vs orbit ICP
+            if rmse_m > 0.025 or overlap < 0.30:
+                R_orb, t_orb, s_orb, rmse_orb, ov_orb = _orbit_icp_fallback_register(
+                    src_pts_k,
+                    src_nrm_k,
+                    world_pts_acc,
+                    world_nrm_acc,
+                    pivot_cv,
+                    up_axis_cv=up_axis_cv,
+                    yaw_hint_deg=yaw_hint,
+                    allow_scale_alignment=allow_scale_alignment,
+                )
+                if ov_orb > overlap + 0.05 and rmse_orb < rmse_m:
+                    R_k, t_k, s_k, rmse_m, overlap = R_orb, t_orb, s_orb, rmse_orb, ov_orb
+                    method = "yaw_hint_icp" if yaw_hint is not None else "orbit_icp_fallback"
+                    inliers_rep = int(round(overlap * src_pts_k.shape[0]))
+            if method.startswith("qubo_mwis"):
+                views_optimized_by_qubo += 1
         else:
             R_k, t_k, s_k, rmse_m, overlap = _orbit_icp_fallback_register(
                 src_pts_k,
@@ -1226,11 +1336,57 @@ def fuse_multiview_frames(
         up_axis_three=up_axis_three,
     )
 
+    body_nrm_three = fused_nrm[fused_fg] if int(np.sum(fused_fg)) >= 24 else fused_nrm
     coverage_360 = compute_360_coverage_and_nbv(
         camera_poses,
         target_center_three,
         up_axis_three=up_axis_three,
+        body_normals_three=body_nrm_three,
     )
+
+    mv_hw_export: Optional[dict[str, Any]] = None
+    if best_hw_pair_args is not None:
+        hw_src, hw_dst, hw_w, hw_seed, _, _ = best_hw_pair_args
+        hw_reg = qubo_mwis_sim3_registration(
+            hw_src,
+            hw_dst,
+            weights=hw_w,
+            allow_scale_alignment=allow_scale_alignment,
+            inlier_thresh_m=0.04,
+            seed=hw_seed,
+            include_hardware_export=True,
+        )
+        mv_hw_export = hw_reg.get("hardware_export")
+    else:
+        nbv_with_hw = plan_nbv_set_cover_qubo(
+            coverage_360["sector_scores"],
+            body_normals_three=body_nrm_three,
+            existing_azimuths_deg=[float(p["azimuth_deg"]) for p in camera_poses],
+            include_hardware_export=True,
+        )
+        mv_hw_export = nbv_with_hw.get("hardware_export")
+
+    quantum_telemetry = {
+        "enabled": bool(use_qubo_registration),
+        "solver_name": "Harvard-HQI Rydberg-MWIS + Simulated Bifurcation",
+        "views_optimized_by_qubo": int(views_optimized_by_qubo),
+        "total_qubo_vars": int(sum(p["n_vars"] for p in qubo_pair_logs)),
+        "total_conflict_edges": int(sum(p["n_conflict_edges"] for p in qubo_pair_logs)),
+        "total_qubo_inliers": int(sum(p["qubo_inliers"] for p in qubo_pair_logs)),
+        "total_ransac_inliers": int(sum(p["ransac_inliers"] for p in qubo_pair_logs)),
+        "mean_energy_gain": round(
+            float(np.mean([p["energy_gain"] for p in qubo_pair_logs])), 4
+        )
+        if qubo_pair_logs
+        else 0.0,
+        "total_solver_ms": round(
+            float(sum(p["solver_ms"] for p in qubo_pair_logs))
+            + float((coverage_360.get("qubo_nbv_plan") or {}).get("solver_ms", 0.0)),
+            2,
+        ),
+        "per_view_pairs": qubo_pair_logs,
+        "hardware_export": mv_hw_export,
+    }
 
     return {
         "view_count": n_views,
@@ -1239,6 +1395,7 @@ def fuse_multiview_frames(
         "body_metrology": body_metrology,
         "point_cloud": point_cloud,
         "fused_box_3d": body_metrology["fused_box_3d"],
+        "quantum_telemetry": quantum_telemetry,
     }
 
 

@@ -25,6 +25,7 @@ import type {
   MoGeBackbone,
   OcclusionEntry,
   PointCloudData,
+  QuantumNmsSummary,
   RealPhotoMetrics,
   SceneAction,
   SceneIntelligence,
@@ -70,6 +71,7 @@ interface LabWorkspaceProps {
   intrinsicDiagnostics?: IntrinsicDiagnostics | null;
   realPhotoMetrics?: RealPhotoMetrics | null;
   sceneIntelligence?: SceneIntelligence | null;
+  quantumNmsSummary?: QuantumNmsSummary | null;
   pointCloud?: PointCloudData | null;
   depthMapBase64?: string | null;
   depthStats?: DepthStats | null;
@@ -140,6 +142,7 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
   intrinsicDiagnostics,
   realPhotoMetrics,
   sceneIntelligence,
+  quantumNmsSummary,
   pointCloud,
   depthMapBase64,
   depthStats,
@@ -527,7 +530,7 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
         </div>
 
         {/* Optional notice / error / active subset banner */}
-        {(notice || error || highlightedIds) && (
+        {(notice || error || highlightedIds || (quantumNmsSummary && quantumNmsSummary.suppressed_count > 0)) && (
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-[#E2E5EA] pt-2.5 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               {error && (
@@ -540,6 +543,11 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({
                 <span className="inline-flex items-center gap-1.5 text-[#4B5563]">
                   <Eye className="h-3.5 w-3.5 text-[#0F766E]" />
                   {notice}
+                </span>
+              )}
+              {quantumNmsSummary && quantumNmsSummary.suppressed_count > 0 && (
+                <span className="border-l-2 border-[#0F766E] pl-2 font-mono-tech text-[11px] text-[#0F766E]">
+                  QUBO-MWIS 3D NMS: {quantumNmsSummary.suppressed_count} colisión(es) suprimida(s) ({quantumNmsSummary.kept_count}/{quantumNmsSummary.input_count} objetos)
                 </span>
               )}
               {highlightedIds && (

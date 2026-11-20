@@ -1400,6 +1400,7 @@ def run_local_metric_3d(
     enable_prompt_free: bool = True,
     moge_backbone: str = "vits",
     aruco_marker_size_cm: Optional[float] = None,
+    enable_qubo_nms: bool = True,
 ) -> dict[str, Any]:
     """Full hybrid/local GPU/CPU RGB -> Metric Depth + Adaptive Discovery/YOLOE -> 9-DOF 3D OBBs + Surfels."""
     from app.services.scene_intelligence import infer_local_scene_discovery, parse_custom_prompt_classes
@@ -1567,6 +1568,34 @@ def run_local_metric_3d(
         if lifted_objects:
             sources_used.append("depth_layer_fallback")
 
+    quantum_nms_summary: Optional[dict[str, Any]] = None
+    if enable_qubo_nms and len(lifted_objects) >= 2:
+        from app.core.quantum_qubo import resolve_3d_objects_mwis_qubo
+
+        q_nms = resolve_3d_objects_mwis_qubo(
+            lifted_objects,
+            include_hardware_export=False,
+        )
+        kept_idx = list(q_nms["kept_indices"])
+        if kept_idx:
+            had_masks = len(kept_masks_proc) == len(lifted_objects)
+            sup_labels = [str(o.get("label", o.get("id"))) for o in q_nms["suppressed_objects"]]
+            lifted_objects = [lifted_objects[i] for i in kept_idx]
+            if had_masks:
+                kept_masks_proc = [kept_masks_proc[i] for i in kept_idx]
+            qs = q_nms["qubo_stats"]
+            quantum_nms_summary = {
+                "enabled": True,
+                "input_count": int(qs["n_vars"]),
+                "kept_count": len(lifted_objects),
+                "suppressed_count": len(q_nms["suppressed_indices"]),
+                "conflict_edges_count": int(qs["n_conflict_edges"]),
+                "energy_gain": float(qs["energy_gain"]),
+                "solver_ms": float(qs["solver_ms"]),
+                "exact_optimum_verified": bool(qs["exact_optimum_verified"]),
+                "suppressed_labels": sup_labels,
+            }
+
     discovery_meta["vlm_guided_count"] = vlm_guided_count
     discovery_meta["detection_sources"] = sources_used
 
@@ -1669,6 +1698,7 @@ def run_local_metric_3d(
         "depth_stats": depth_stats,
         "point_cloud": point_cloud,
         "real_photo_metrics": real_metrics,
+        "quantum_nms_summary": quantum_nms_summary,
         "latency_ms": latency_ms,
     }
 
@@ -1700,6 +1730,7 @@ def run_local_multiview_360(
     voxel_size_m: Optional[float] = None,
     allow_scale_alignment: bool = True,
     aruco_marker_size_cm: Optional[float] = None,
+    use_qubo_registration: bool = True,
 ) -> dict[str, Any]:
     """Sequentially lift 2-6 orbital RGB images via MoGe-2 and fuse into a 360-degree 3D model."""
     t0 = time.perf_counter()
@@ -1776,6 +1807,7 @@ def run_local_multiview_360(
         frames,
         voxel_size_m=voxel_size_m,
         allow_scale_alignment=allow_scale_alignment,
+        use_qubo_registration=use_qubo_registration,
     )
     latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
     mode_name = "multiview_moge2_gpu" if last_device.startswith("cuda") else "multiview_moge2_cpu"
@@ -1791,6 +1823,7 @@ def run_local_multiview_360(
         "body_metrology": fused["body_metrology"],
         "point_cloud": fused["point_cloud"],
         "fused_box_3d": fused["fused_box_3d"],
+        "quantum_telemetry": fused.get("quantum_telemetry"),
         "width": first_w,
         "height": first_h,
         "fov_h_deg": first_fov,

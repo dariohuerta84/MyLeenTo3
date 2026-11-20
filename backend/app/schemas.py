@@ -136,6 +136,7 @@ class AnalyzeRequest(BaseModel):
     enable_diagnosis: bool = True
     moge_backbone: MoGeBackbone = "vits"
     aruco_marker_size_cm: Optional[float] = Field(default=None, ge=1.0, le=100.0)
+    enable_qubo_nms: bool = True
 
 
 class AnalyzeResponse(BaseModel):
@@ -168,6 +169,7 @@ class AnalyzeResponse(BaseModel):
     point_cloud: Optional[dict[str, Any]] = None
     real_photo_metrics: Optional[dict[str, Any]] = None
     scene_intelligence: Optional[dict[str, Any]] = None
+    quantum_nms_summary: Optional[dict[str, Any]] = None
     latency_ms: float
     usage: dict[str, Any]
 
@@ -335,6 +337,7 @@ class MultiViewReconstructRequest(BaseModel):
     allow_scale_alignment: bool = True
     voxel_size_mm: Optional[float] = Field(default=None, ge=2.0, le=50.0)
     aruco_marker_size_cm: Optional[float] = Field(default=None, ge=1.0, le=100.0)
+    use_qubo_optimizer: bool = True
 
 
 class MultiViewCameraPose(BaseModel):
@@ -362,6 +365,7 @@ class MultiViewCoverage360(BaseModel):
     recommended_next_azimuth_deg: float
     is_watertight_360: bool
     next_best_view_advice_es: str
+    qubo_nbv_plan: Optional[dict[str, Any]] = None
 
 
 class MultiViewBodyMetrology(BaseModel):
@@ -397,4 +401,43 @@ class MultiViewReconstructResponse(BaseModel):
     objects: list[EnrichedObject] = Field(default_factory=list)
     point_cloud: dict[str, Any]
     depth_stats: Optional[dict[str, float]] = None
+    quantum_telemetry: Optional[dict[str, Any]] = None
+    latency_ms: float
+
+
+QuantumTaskType = Literal["registration_stress", "nms_3d", "nbv_plan"]
+
+
+class QuantumOptimizeRequest(BaseModel):
+    task: QuantumTaskType = "registration_stress"
+    n_correspondences: int = Field(default=72, ge=12, le=140)
+    outlier_ratio: float = Field(default=0.75, ge=0.0, le=0.90)
+    noise_mm: float = Field(default=4.0, ge=0.0, le=30.0)
+    allow_scale: bool = True
+    objects: Optional[list[ObjectInput]] = None
+    conflict_iou_threshold: float = Field(default=0.28, ge=0.05, le=0.80)
+    existing_azimuths_deg: Optional[list[float]] = None
+    sector_scores: Optional[list[float]] = None
+    budget_k: Optional[int] = Field(default=None, ge=1, le=6)
+    seed: int = Field(default=42, ge=0, le=100000)
+
+
+class QuantumOptimizeResponse(BaseModel):
+    task: str
+    title_es: str
+    summary_es: str
+    qubo_stats: dict[str, Any]
+    baseline_comparison: dict[str, Any]
+    energy_history: list[dict[str, Any]]
+    graph_preview: dict[str, Any]
+    details: dict[str, Any]
+    hardware_export: dict[str, Any]
+    latency_ms: float
+
+
+class QuantumDemoResponse(BaseModel):
+    seed: int
+    engine_version: str
+    references: list[str]
+    scenarios: dict[str, QuantumOptimizeResponse]
     latency_ms: float

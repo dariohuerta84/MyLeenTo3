@@ -15,6 +15,9 @@ import type {
   MultiViewInputImage,
   MultiViewReconstructResponse,
   PairwiseGeometry,
+  QuantumDemoResponse,
+  QuantumOptimizeResponse,
+  QuantumTaskType,
   RealPhotoMetrics,
   ReprojectResponse,
   SceneIntelligence,
@@ -82,6 +85,7 @@ export interface AnalyzePayload {
   enable_diagnosis?: boolean;
   moge_backbone?: MoGeBackbone;
   aruco_marker_size_cm?: number;
+  enable_qubo_nms?: boolean;
 }
 
 export async function analyzeScene(
@@ -262,6 +266,7 @@ export interface MultiViewReconstructPayload {
   allow_scale_alignment?: boolean;
   voxel_size_mm?: number;
   aruco_marker_size_cm?: number;
+  use_qubo_optimizer?: boolean;
 }
 
 export async function fetchMultiViewDemo(): Promise<MultiViewReconstructResponse> {
@@ -274,5 +279,35 @@ export async function reconstructMultiView360(
   return requestJson<MultiViewReconstructResponse>('/multiview-reconstruct', {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export interface QuantumOptimizePayload {
+  task: QuantumTaskType;
+  n_correspondences?: number;
+  outlier_ratio?: number;
+  noise_mm?: number;
+  allow_scale?: boolean;
+  objects?: SpatialObject[];
+  conflict_iou_threshold?: number;
+  existing_azimuths_deg?: number[];
+  sector_scores?: number[];
+  budget_k?: number;
+  seed?: number;
+}
+
+export async function fetchQuantumDemo(): Promise<QuantumDemoResponse> {
+  return requestJson<QuantumDemoResponse>('/quantum/demo');
+}
+
+export async function runQuantumOptimization(
+  payload: QuantumOptimizePayload
+): Promise<QuantumOptimizeResponse> {
+  const bodyPayload = payload.objects
+    ? { ...payload, objects: payload.objects.map(toObjectInput) }
+    : payload;
+  return requestJson<QuantumOptimizeResponse>('/quantum/optimize', {
+    method: 'POST',
+    body: JSON.stringify(bodyPayload),
   });
 }

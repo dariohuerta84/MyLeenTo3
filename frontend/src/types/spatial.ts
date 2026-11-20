@@ -7,7 +7,7 @@ export type ThinkingLevel = 'low' | 'medium' | 'high';
 
 export type CameraViewMode = 'camera_aligned' | 'orbit' | 'bev' | 'isometric';
 
-export type AppSection = 'landing' | 'lab' | 'multiview' | 'multiframe' | 'metrics';
+export type AppSection = 'landing' | 'lab' | 'multiview' | 'quantum' | 'multiframe' | 'metrics';
 
 export type AnalyzeEngine =
   | 'auto'
@@ -426,6 +426,7 @@ export interface AnalyzeResponse {
   point_cloud?: PointCloudData | null;
   real_photo_metrics?: RealPhotoMetrics | null;
   scene_intelligence?: SceneIntelligence | null;
+  quantum_nms_summary?: QuantumNmsSummary | null;
   latency_ms: number;
   usage?: Record<string, unknown> | null;
   mode: string;
@@ -460,6 +461,7 @@ export interface CalibrateScaleResponse {
   depth_stats?: DepthStats | null;
   real_photo_metrics?: RealPhotoMetrics | null;
   scene_intelligence?: SceneIntelligence | null;
+  quantum_nms_summary?: QuantumNmsSummary | null;
   latency_ms: number;
 }
 
@@ -612,6 +614,135 @@ export interface MultiViewCameraPose {
   thumbnail_base64?: string | null;
 }
 
+export interface QuantumNmsSummary {
+  enabled: boolean;
+  input_count: number;
+  kept_count: number;
+  suppressed_count: number;
+  conflict_edges_count: number;
+  energy_gain: number;
+  solver_ms: number;
+  exact_optimum_verified: boolean;
+  suppressed_labels: string[];
+}
+
+export interface QuboNbvPlan {
+  budget_k: number;
+  optimal_shot_plan_deg: number[];
+  optimal_sector_indices: number[];
+  current_coverage_pct: number;
+  predicted_coverage_after_plan_pct: number;
+  predicted_sector_scores: number[];
+  shots_saved_vs_uniform_6: number;
+  shadow_uncertainty_by_sector: number[];
+  qubo_energy: number;
+  greedy_energy: number;
+  energy_gain: number;
+  greedy_plan_deg: number[];
+  greedy_predicted_coverage_pct: number;
+  solver_ms: number;
+  energy_history: Array<{ step: number; best_energy: number; mean_energy: number }>;
+  advice_es: string;
+}
+
+export interface QuEraAtomNode {
+  id: number;
+  label: string;
+  x_um: number;
+  y_um: number;
+  selected: boolean;
+}
+
+export interface QuantumHardwareExport {
+  bqm_braket: {
+    format: string;
+    vartype: string;
+    problem_name: string;
+    num_variables: number;
+    num_quadratic_couplings: number;
+    offset: number;
+    linear: Record<string, number>;
+    quadratic: Record<string, number>;
+    compatible_backends: string[];
+  };
+  quera_aquila_register: {
+    device: string;
+    reference: string;
+    rydberg_blockade_radius_um: number;
+    min_atom_spacing_um: number;
+    observed_min_spacing_um: number;
+    field_of_view_um: [number, number];
+    max_physical_qubits: number;
+    embedded_nodes: number;
+    total_problem_nodes: number;
+    unit_disk_fidelity: number;
+    non_unit_disk_violations: number;
+    nguyen_2023_gadget_qubits_est: number;
+    total_estimated_qubits: number;
+    hardware_ready: boolean;
+    atoms_um: QuEraAtomNode[];
+  };
+}
+
+export interface QuantumTelemetrySummary {
+  enabled: boolean;
+  solver_name: string;
+  views_optimized_by_qubo: number;
+  total_qubo_vars: number;
+  total_conflict_edges: number;
+  total_qubo_inliers: number;
+  total_ransac_inliers: number;
+  mean_energy_gain: number;
+  total_solver_ms: number;
+  per_view_pairs: Array<{
+    view_index: number;
+    anchor_index: number;
+    method_won: string;
+    n_vars: number;
+    n_conflict_edges: number;
+    qubo_inliers: number;
+    ransac_inliers: number;
+    energy_gain: number;
+    solver_ms: number;
+  }>;
+  hardware_export?: QuantumHardwareExport | null;
+}
+
+export type QuantumTaskType = 'registration_stress' | 'nms_3d' | 'nbv_plan';
+
+export interface QuantumOptimizeResponse {
+  task: QuantumTaskType | string;
+  title_es: string;
+  summary_es: string;
+  qubo_stats: Record<string, unknown>;
+  baseline_comparison: Record<string, unknown>;
+  energy_history: Array<{ step: number; best_energy: number; mean_energy: number }>;
+  graph_preview: {
+    nodes: Array<{
+      id: number;
+      label: string;
+      weight: number;
+      selected: boolean;
+      x: number;
+      y: number;
+    }>;
+    edges: Array<{ source: number; target: number; kind: string }>;
+    shown_nodes: number;
+    total_nodes: number;
+  };
+  details: Record<string, unknown>;
+  hardware_export: QuantumHardwareExport;
+  latency_ms: number;
+}
+
+export interface QuantumDemoResponse {
+  seed: number;
+  engine_version: string;
+  references: string[];
+  scenarios: Record<string, QuantumOptimizeResponse>;
+  latency_ms: number;
+}
+
 export interface MultiViewCoverage360 {
   sector_scores: number[];
   angular_coverage_pct: number;
@@ -619,6 +750,7 @@ export interface MultiViewCoverage360 {
   recommended_next_azimuth_deg: number;
   is_watertight_360: boolean;
   next_best_view_advice_es: string;
+  qubo_nbv_plan?: QuboNbvPlan | null;
 }
 
 export interface MultiViewBodyMetrology {
@@ -654,5 +786,6 @@ export interface MultiViewReconstructResponse {
   objects: SpatialObject[];
   point_cloud: PointCloudData;
   depth_stats?: DepthStats | null;
+  quantum_telemetry?: QuantumTelemetrySummary | null;
   latency_ms: number;
 }

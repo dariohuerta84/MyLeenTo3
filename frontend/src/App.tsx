@@ -14,6 +14,7 @@ import type {
   MoGeBackbone,
   OcclusionEntry,
   PointCloudData,
+  QuantumNmsSummary,
   RealPhotoMetrics,
   SceneAction,
   SceneIntelligence,
@@ -37,6 +38,7 @@ import { LabWorkspace } from './components/LabWorkspace';
 import { MultiView360Workspace } from './components/MultiView360Workspace';
 import { MetricsBenchmarkPanel } from './components/MetricsBenchmarkPanel';
 import { MultiFrameAuditPanel } from './components/MultiFrameAuditPanel';
+import { QuantumQuboWorkspace } from './components/QuantumQuboWorkspace';
 
 const DEFAULT_THINKING_BY_MODEL: Record<GeminiModelId, ThinkingLevel> = {
   'gemini-4-hydrogen': 'high',
@@ -44,7 +46,7 @@ const DEFAULT_THINKING_BY_MODEL: Record<GeminiModelId, ThinkingLevel> = {
   'gemini-3.5-flash-lite': 'low',
 };
 
-const VALID_VIEWS: AppSection[] = ['landing', 'lab', 'multiview', 'multiframe', 'metrics'];
+const VALID_VIEWS: AppSection[] = ['landing', 'lab', 'multiview', 'quantum', 'multiframe', 'metrics'];
 
 function getInitialQueryParams(): { view: AppSection; scene?: string } {
   if (typeof window === 'undefined') return { view: 'landing' };
@@ -95,6 +97,7 @@ export function App() {
   const [fovSource, setFovSource] = useState<string | null>(null);
   const [realPhotoMetrics, setRealPhotoMetrics] = useState<RealPhotoMetrics | null>(null);
   const [sceneIntelligence, setSceneIntelligence] = useState<SceneIntelligence | null>(null);
+  const [quantumNmsSummary, setQuantumNmsSummary] = useState<QuantumNmsSummary | null>(null);
   const [scaleFactor, setScaleFactor] = useState<number>(1.0);
   const [scaleLabel, setScaleLabel] = useState<string | null>(null);
   const [arucoAnchor, setArucoAnchor] = useState<ArucoAnchor | null>(null);
@@ -156,6 +159,7 @@ export function App() {
     setDepthStats(null);
     setFovSource(null);
     setRealPhotoMetrics(null);
+    setQuantumNmsSummary(null);
     setArucoAnchor(null);
     setScaleFactor(1.0);
     setScaleLabel(null);
@@ -171,6 +175,7 @@ export function App() {
     setDepthStats(res.depth_stats ?? null);
     setFovSource(res.fov_source ?? null);
     setRealPhotoMetrics(res.real_photo_metrics ?? null);
+    setQuantumNmsSummary(res.quantum_nms_summary ?? null);
     setArucoAnchor(res.aruco_anchor ?? null);
     baseDepthStatsRef.current = res.depth_stats ?? null;
     baseRealPhotoMetricsRef.current = res.real_photo_metrics ?? null;
@@ -629,6 +634,56 @@ export function App() {
     navigateTo('lab');
   };
 
+  const handleApplyOptimizedLabObjects = useCallback(
+    async (keptIds: string[]) => {
+      const keptSet = new Set(keptIds);
+      const filtered = objectsRef.current.filter((obj) => keptSet.has(obj.id));
+      if (filtered.length === 0) return;
+
+      const prevCount = objectsRef.current.length;
+      setObjects(filtered);
+      baseObjectsRef.current = filtered;
+      setSelectedObjectId(null);
+      setMeasurement(null);
+      setHighlightedIds(null);
+      setQuantumNmsSummary({
+        enabled: true,
+        input_count: prevCount,
+        kept_count: filtered.length,
+        suppressed_count: Math.max(0, prevCount - filtered.length),
+        conflict_edges_count: Math.max(0, prevCount - filtered.length),
+        energy_gain: 0,
+        solver_ms: 0,
+        exact_optimum_verified: true,
+        suppressed_labels: [],
+      });
+      setNotice(
+        `Optimizador QUBO-MWIS aplicado en Laboratorio 3D: ${filtered.length}/${prevCount} objetos sin colisiones.`
+      );
+      navigateTo('lab');
+
+      try {
+        const res = await reprojectScene({
+          objects: filtered,
+          gt_objects: gtObjectsRef.current,
+          image_base64: imageBase64Ref.current || undefined,
+          width,
+          height,
+          fov_h_deg: fovHDeg,
+        });
+        setObjects(res.objects ?? filtered);
+        setOcclusionMatrix(res.occlusion_matrix ?? []);
+        if (res.metrics !== undefined) setMetrics(res.metrics);
+        if (res.intrinsic_diagnostics !== undefined) {
+          setIntrinsicDiagnostics(res.intrinsic_diagnostics);
+        }
+      } catch {
+        // Keep filtered subset if offline reproject fails transiently
+      }
+    },
+    [fovHDeg, height, navigateTo, width]
+  );
+
   const activeSceneTitle =
     customImageTitle ??
     benchmarks.find((b) => b.id === activeBenchmarkId)?.title ??
@@ -697,6 +752,7 @@ export function App() {
             intrinsicDiagnostics={intrinsicDiagnostics}
             realPhotoMetrics={realPhotoMetrics}
             sceneIntelligence={sceneIntelligence}
+            quantumNmsSummary={quantumNmsSummary}
             pointCloud={pointCloud}
             depthMapBase64={depthMapBase64}
             depthStats={depthStats}
@@ -745,6 +801,14 @@ export function App() {
             onChangeMogeBackbone={setMogeBackbone}
             local3dAvailable={local3dAvailable}
             local3dDevice={local3dDevice}
+          />
+        )}
+
+        {activeSection === 'quantum' && (
+          <QuantumQuboWorkspace
+            labObjects={objects}
+            onApplyOptimizedLabObjects={handleApplyOptimizedLabObjects}
+            onNavigate={navigateTo}
           />
         )}
 

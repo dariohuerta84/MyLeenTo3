@@ -3,6 +3,8 @@ import {
   AlertCircle,
   Camera,
   Compass,
+  Cpu,
+  Download,
   Layers,
   Loader2,
   Play,
@@ -91,6 +93,7 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
 
   const [drafts, setDrafts] = useState<UploadedViewDraft[]>([]);
   const [allowScaleAlignment, setAllowScaleAlignment] = useState<boolean>(true);
+  const [useQuboOptimizer, setUseQuboOptimizer] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<MultiViewReconstructResponse | null>(null);
@@ -153,20 +156,36 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
   };
 
   const handleRunFusion = async () => {
-    if (drafts.length === 0) {
-      await loadCalibratedDemo();
-      return;
-    }
-    if (drafts.length < 2) {
-      setError('Sube entre 2 y 6 fotografías orbitales alrededor del cuerpo para fusionar en 360°.');
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setScaleFactor(1.0);
     setScaleLabel(null);
     setSelectedObjectId(null);
+
+    if (drafts.length === 0) {
+      try {
+        const res = await reconstructMultiView360({
+          use_demo: true,
+          allow_scale_alignment: allowScaleAlignment,
+          use_qubo_optimizer: useQuboOptimizer,
+        });
+        setResult(res);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'No se pudo ejecutar la reconstrucción demo 360°'
+        );
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    if (drafts.length < 2) {
+      setLoading(false);
+      setError('Sube entre 2 y 6 fotografías orbitales alrededor del cuerpo para fusionar en 360°.');
+      return;
+    }
 
     const payloadImages: MultiViewInputImage[] = drafts.map((d, idx) => {
       const parsedYaw = d.yawHint.trim() !== '' ? Number(d.yawHint) : NaN;
@@ -185,6 +204,7 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
         moge_backbone: mogeBackbone,
         auto_fov: true,
         allow_scale_alignment: allowScaleAlignment,
+        use_qubo_optimizer: useQuboOptimizer,
       });
       setResult(res);
     } catch (err) {
@@ -341,6 +361,16 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
               className="accent-[#1D4ED8]"
             />
             <span>Alinear escala Sim(3)</span>
+          </label>
+
+          <label className="inline-flex cursor-pointer items-center gap-1.5 border border-[#15284B]/22 bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#111827]">
+            <input
+              type="checkbox"
+              checked={useQuboOptimizer}
+              onChange={(e) => setUseQuboOptimizer(e.target.checked)}
+              className="accent-[#9F1239]"
+            />
+            <span>Optimizador QUBO-MWIS</span>
           </label>
 
           <button
@@ -611,6 +641,26 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
                     );
                   })()}
 
+                  {/* Multi-shot QUBO Set-Cover Plan Needles */}
+                  {cov.angular_coverage_pct < 95 &&
+                    (cov.qubo_nbv_plan?.optimal_shot_plan_deg ?? []).map((azShot, idx) => {
+                      const [sx, sy] = polarToCartesian(100, 100, 68, azShot);
+                      return (
+                        <g key={`q-nbv-${idx}`}>
+                          <line
+                            x1="100"
+                            y1="100"
+                            x2={sx}
+                            y2={sy}
+                            stroke="#9F1239"
+                            strokeWidth="1.6"
+                            strokeDasharray="2 2"
+                          />
+                          <circle cx={sx} cy={sy} r="3.5" fill="#9F1239" />
+                        </g>
+                      );
+                    })}
+
                   {/* Registered cameras */}
                   {result?.camera_poses.map((pose) => {
                     const [px, py] = polarToCartesian(100, 100, 84, pose.azimuth_deg);
@@ -661,6 +711,11 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
                   <p className="text-[11px] leading-relaxed text-[#4B5563]">
                     {cov.next_best_view_advice_es}
                   </p>
+                  {cov.qubo_nbv_plan && (
+                    <p className="border-t border-[#E2E5EA] pt-1.5 font-mono-tech text-[10px] leading-relaxed text-[#9F1239]">
+                      {cov.qubo_nbv_plan.advice_es}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -772,6 +827,8 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
                         <td className="py-1.5 pr-2 text-[#111827]">{p.azimuth_deg.toFixed(0)}°</td>
                         <td className="py-1.5 pr-2 text-[#4B5563]">
                           {p.registration_method
+                            .replace('qubo_mwis_aruco_sim3_icp', 'QUBO+ArUco')
+                            .replace('qubo_mwis_sim3_icp', 'QUBO-MWIS+ICP')
                             .replace('sift_aruco_sim3_icp', 'ArUco+SIFT')
                             .replace('sift_sim3_icp', 'SIFT+ICP')
                             .replace('yaw_hint_icp', 'OrbitHint+ICP')
@@ -787,6 +844,74 @@ export const MultiView360Workspace: React.FC<MultiView360WorkspaceProps> = ({
                   </tbody>
                 </table>
               </div>
+            </section>
+          )}
+
+          {/* 4. Phase 4 Quantum-Inspired QUBO-MWIS Telemetry */}
+          {result?.quantum_telemetry && (
+            <section className="border border-[#15284B]/18 border-l-2 border-l-[#9F1239] bg-[#FFFFFF] p-4">
+              <div className="flex items-center justify-between border-b border-[#E2E5EA] pb-2">
+                <h2 className="flex items-center gap-1.5 text-xs font-semibold text-[#111827]">
+                  <Cpu className="h-3.5 w-3.5 text-[#9F1239]" />
+                  <span>Telemetría QUBO-MWIS (Harvard HQI)</span>
+                </h2>
+                <span
+                  className={`font-mono-tech text-[10px] font-semibold ${
+                    result.quantum_telemetry.enabled ? 'text-[#0F766E]' : 'text-[#4B5563]'
+                  }`}
+                >
+                  {result.quantum_telemetry.enabled ? 'QUBO Activo' : 'Solo RANSAC'}
+                </span>
+              </div>
+
+              <dl className="mt-1 divide-y divide-[#E2E5EA] text-xs">
+                <div className="flex items-center justify-between py-1.5">
+                  <dt className="text-[#4B5563]">Vistas QUBO / Vars / Conflictos</dt>
+                  <dd className="font-mono-tech font-medium text-[#111827]">
+                    {result.quantum_telemetry.views_optimized_by_qubo} ·{' '}
+                    {result.quantum_telemetry.total_qubo_vars} ·{' '}
+                    {result.quantum_telemetry.total_conflict_edges}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between py-1.5">
+                  <dt className="text-[#4B5563]">Inliers QUBO vs. RANSAC</dt>
+                  <dd className="font-mono-tech font-semibold text-[#1D4ED8]">
+                    {result.quantum_telemetry.total_qubo_inliers} vs.{' '}
+                    {result.quantum_telemetry.total_ransac_inliers}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between py-1.5">
+                  <dt className="text-[#4B5563]">Ganancia ΔE · Latencia solver</dt>
+                  <dd className="font-mono-tech font-medium text-[#0F766E]">
+                    Δ{result.quantum_telemetry.mean_energy_gain.toFixed(2)} ·{' '}
+                    {result.quantum_telemetry.total_solver_ms.toFixed(1)} ms
+                  </dd>
+                </div>
+              </dl>
+
+              {result.quantum_telemetry.hardware_export && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const blob = new Blob(
+                      [JSON.stringify(result.quantum_telemetry?.hardware_export, null, 2)],
+                      { type: 'application/json' }
+                    );
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'myleento3_multiview_bqm_aquila.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 border border-[#15284B]/25 bg-[#FAF8F4] px-3 py-1.5 text-[11px] font-medium text-[#15284B] transition-colors hover:border-[#15284B] hover:bg-[#15284B] hover:text-white"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Exportar BQM / QuEra Aquila (.json)</span>
+                </button>
+              )}
             </section>
           )}
         </aside>

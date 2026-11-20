@@ -35,7 +35,8 @@ COPILOT_SYSTEM_INSTRUCTION = (
     "NUNCA calcules distancias, volúmenes, colisiones, oclusiones ni métricas mentalmente: "
     "SIEMPRE invoca las herramientas deterministas provistas (`focus_object`, `measure_distance`, "
     "`set_camera_view`, `analyze_occlusions_and_collisions`, `filter_objects`, "
-    "`run_fov_sensitivity_sweep`, `evaluate_escalation_policy`, `generate_domain_diagnosis`) "
+    "`run_fov_sensitivity_sweep`, `evaluate_escalation_policy`, `generate_domain_diagnosis`, "
+    "`optimize_scene_qubo_mwis`) "
     "para obtener resultados exactos y controlar el visor 3D. "
     "Responde en español técnico claro, conciso y cuantitativo usando exclusivamente los valores "
     "retornados por las herramientas (metros, grados, porcentajes y veredictos)."
@@ -150,6 +151,20 @@ COPILOT_TOOLS: list[dict[str, Any]] = [
             "properties": {},
         },
     },
+    {
+        "type": "function",
+        "name": "optimize_scene_qubo_mwis",
+        "description": "Runs Phase 4 Harvard-HQI Rydberg QUBO-MWIS combinatorial 3D NMS over the active 3D objects to select the maximum-weight collision-free subset and highlight it in the 3D viewport.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "conflict_iou_threshold": {
+                    "type": "number",
+                    "description": "3D IoU threshold above which colliding boxes share a Rydberg blockade conflict edge (default 0.28).",
+                }
+            },
+        },
+    },
 ]
 
 
@@ -215,6 +230,7 @@ class SpatialToolbox:
             "run_fov_sensitivity_sweep": self.run_fov_sensitivity_sweep,
             "evaluate_escalation_policy": self.evaluate_escalation_policy,
             "generate_domain_diagnosis": self.generate_domain_diagnosis,
+            "optimize_scene_qubo_mwis": self.optimize_scene_qubo_mwis,
         }
         handler = handler_map.get(name)
         if handler is None:
@@ -511,6 +527,40 @@ class SpatialToolbox:
             "scale_consistency_note": diag.get("scale_consistency_note", scale_note),
         }
 
+    def optimize_scene_qubo_mwis(
+        self,
+        conflict_iou_threshold: float = 0.28,
+    ) -> dict[str, Any]:
+        from app.core.quantum_qubo import resolve_3d_objects_mwis_qubo
+
+        res = resolve_3d_objects_mwis_qubo(
+            self.objects,
+            conflict_iou_threshold=float(conflict_iou_threshold),
+            include_hardware_export=False,
+        )
+        kept_ids = [str(o.get("id", f"obj_{idx}")) for idx, o in zip(res["kept_indices"], res["kept_objects"])]
+        suppressed_ids = [
+            str(o.get("id", f"obj_{idx}")) for idx, o in zip(res["suppressed_indices"], res["suppressed_objects"])
+        ]
+        self.scene_actions.append({"type": "highlight_subset", "object_ids": kept_ids})
+        qs = res["qubo_stats"]
+        return {
+            "input_count": len(self.objects),
+            "kept_count": len(kept_ids),
+            "suppressed_count": len(suppressed_ids),
+            "kept_ids": kept_ids,
+            "kept_labels": [str(o.get("label", "")) for o in res["kept_objects"]],
+            "suppressed_labels": [str(o.get("label", "")) for o in res["suppressed_objects"]],
+            "conflict_edges_count": int(qs["n_conflict_edges"]),
+            "qubo_energy": float(qs["qubo_energy"]),
+            "greedy_energy": float(qs["greedy_energy"]),
+            "energy_gain": float(qs["energy_gain"]),
+            "qubo_weight_sum": float(qs["qubo_weight_sum"]),
+            "greedy_weight_sum": float(qs["greedy_weight_sum"]),
+            "exact_optimum_verified": bool(qs["exact_optimum_verified"]),
+            "solver_ms": float(qs["solver_ms"]),
+        }
+
 
 def _scene_context_block(
     objects: list[dict[str, Any]],
@@ -793,6 +843,20 @@ def _run_offline_router(message: str, toolbox: SpatialToolbox) -> str:
             f"{top_finding}{action_txt}".strip()
         )
 
+    # 6d. Phase 4 Harvard HQI QUBO-MWIS 3D Collision Optimization
+    if any(k in norm for k in ["qubo", "mwis", "cuantic", "quantum", "rydberg"]) or (
+        "optimiz" in norm and any(k in norm for k in ["colisi", "nms", "escena", "objetos"])
+    ):
+        res = toolbox.execute("optimize_scene_qubo_mwis", {})
+        kept_preview = ", ".join(f"`{lbl}`" for lbl in (res.get("kept_labels") or [])[:6]) or "ninguno"
+        parts.append(
+            f"Optimización combinatoria **QUBO-MWIS (Harvard HQI)** completada en "
+            f"**{res.get('solver_ms', 0.0):.2f} ms**: seleccionados **{res.get('kept_count', 0)}/{res.get('input_count', 0)}** "
+            f"objetos sin colisiones físicas (`{res.get('conflict_edges_count', 0)}` aristas de bloqueo Rydberg, "
+            f"energía QUBO = **{res.get('qubo_energy', 0.0):.2f}** vs. Greedy = **{res.get('greedy_energy', 0.0):.2f}**, "
+            f"ganancia **ΔE = {res.get('energy_gain', 0.0):.2f}**). Subconjunto óptimo resaltado: {kept_preview}."
+        )
+
     # Fallback overview if no specific command matched
     if not parts:
         nearest = sorted_by_depth[0]
@@ -847,7 +911,7 @@ def run_spatial_copilot(
             "mode": "offline_demo",
             "notice": (
                 "Ejecutado con el enrutador determinista local (sin API key de Google AI Studio). "
-                "Se invocaron exactamente las mismas 8 herramientas geométricas Python."
+                "Se invocaron exactamente las mismas 9 herramientas geométricas Python."
             ),
             "model": model,
             "interaction_id": None,

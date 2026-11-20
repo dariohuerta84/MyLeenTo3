@@ -29,6 +29,10 @@ from app.core.multiview_fusion import (
     build_offline_multiview_frame,
     fuse_multiview_frames,
 )
+from app.core.quantum_qubo import (
+    build_quantum_demo_suite,
+    run_quantum_optimization_task,
+)
 from app.core.scale_calibration import (
     clamp_scale_factor,
     compute_scale_factor_from_reference,
@@ -56,6 +60,9 @@ from app.schemas import (
     MultiFrameAuditRequest,
     MultiViewReconstructRequest,
     MultiViewReconstructResponse,
+    QuantumDemoResponse,
+    QuantumOptimizeRequest,
+    QuantumOptimizeResponse,
     ReprojectRequest,
     ReprojectResponse,
     SUPPORTED_MODELS,
@@ -244,6 +251,7 @@ def analyze_scene(
     discovery_meta: Optional[dict[str, Any]] = None
     active_moge_backbone: Optional[str] = None
     aruco_anchor: Optional[dict[str, Any]] = None
+    quantum_nms_summary: Optional[dict[str, Any]] = None
 
     use_local_depth = req.engine != "salience_fallback" and is_local_3d_available()
 
@@ -251,7 +259,7 @@ def analyze_scene(
         nonlocal image_b64, mime_type, width, height, effective_fov_h_deg, fov_source
         nonlocal exif_fov_h_deg, estimated_moge_fov_h_deg, raw_objects, scene_summary
         nonlocal depth_map_base64, depth_stats, point_cloud, real_photo_metrics
-        nonlocal latency_ms, mode, discovery_meta, active_moge_backbone, aruco_anchor
+        nonlocal latency_ms, mode, discovery_meta, active_moge_backbone, aruco_anchor, quantum_nms_summary
 
         image_b64 = local_res["image_base64"]
         mime_type = local_res["mime_type"]
@@ -270,6 +278,7 @@ def analyze_scene(
         discovery_meta = local_res.get("discovery_meta")
         active_moge_backbone = local_res.get("moge_backbone")
         aruco_anchor = local_res.get("aruco_anchor")
+        quantum_nms_summary = local_res.get("quantum_nms_summary")
         latency_ms = local_res["latency_ms"]
         mode = local_res["mode"]
 
@@ -359,6 +368,7 @@ def analyze_scene(
                 vlm_discovery=vlm_discovery,
                 moge_backbone=req.moge_backbone,
                 aruco_marker_size_cm=req.aruco_marker_size_cm,
+                enable_qubo_nms=req.enable_qubo_nms,
             )
             _apply_local_result(local_res)
             d_min = float((depth_stats or {}).get("min_m", 0.0))
@@ -433,6 +443,7 @@ def analyze_scene(
                         custom_prompt=req.custom_prompt,
                         moge_backbone=req.moge_backbone,
                         aruco_marker_size_cm=req.aruco_marker_size_cm,
+                        enable_qubo_nms=req.enable_qubo_nms,
                     )
                     _apply_local_result(local_res)
                     notice = (
@@ -458,6 +469,7 @@ def analyze_scene(
                 custom_prompt=req.custom_prompt,
                 moge_backbone=req.moge_backbone,
                 aruco_marker_size_cm=req.aruco_marker_size_cm,
+                enable_qubo_nms=req.enable_qubo_nms,
             )
             _apply_local_result(local_res)
             d_min = float((depth_stats or {}).get("min_m", 0.0))
@@ -557,6 +569,7 @@ def analyze_scene(
         point_cloud=point_cloud,
         real_photo_metrics=real_photo_metrics,
         scene_intelligence=scene_intelligence,
+        quantum_nms_summary=quantum_nms_summary,
         latency_ms=latency_ms,
         usage=usage,
     )
@@ -978,6 +991,7 @@ def _assemble_multiview_response(
         objects=[fused_obj],
         point_cloud=fused_payload["point_cloud"],
         depth_stats=depth_stats,
+        quantum_telemetry=fused_payload.get("quantum_telemetry"),
         latency_ms=round(float(latency_ms), 2),
     )
 
@@ -986,6 +1000,7 @@ def _run_multiview_demo(
     *,
     voxel_size_mm: Optional[float] = None,
     allow_scale_alignment: bool = True,
+    use_qubo_optimizer: bool = True,
 ) -> MultiViewReconstructResponse:
     t0 = time.perf_counter()
     frames, gt_vol = build_demo_multiview_360_frames(4)
@@ -995,6 +1010,7 @@ def _run_multiview_demo(
         voxel_size_m=vox_m,
         allow_scale_alignment=allow_scale_alignment,
         gt_volume_m3=gt_vol,
+        use_qubo_registration=use_qubo_optimizer,
     )
     latency_ms = (time.perf_counter() - t0) * 1000.0
     depth_stats = {
@@ -1029,6 +1045,7 @@ def multiview_reconstruct(req: MultiViewReconstructRequest) -> MultiViewReconstr
         return _run_multiview_demo(
             voxel_size_mm=req.voxel_size_mm,
             allow_scale_alignment=req.allow_scale_alignment,
+            use_qubo_optimizer=req.use_qubo_optimizer,
         )
 
     if len(req.images) < 2 or len(req.images) > 6:
@@ -1050,6 +1067,7 @@ def multiview_reconstruct(req: MultiViewReconstructRequest) -> MultiViewReconstr
                 voxel_size_m=vox_m,
                 allow_scale_alignment=req.allow_scale_alignment,
                 aruco_marker_size_cm=req.aruco_marker_size_cm,
+                use_qubo_registration=req.use_qubo_optimizer,
             )
             return _assemble_multiview_response(
                 gpu_res,
@@ -1080,6 +1098,7 @@ def multiview_reconstruct(req: MultiViewReconstructRequest) -> MultiViewReconstr
         frames,
         voxel_size_m=vox_m,
         allow_scale_alignment=req.allow_scale_alignment,
+        use_qubo_registration=req.use_qubo_optimizer,
     )
     latency_ms = (time.perf_counter() - t0) * 1000.0
     first_rgb = frames[0]["rgb_u8"]
@@ -1095,3 +1114,20 @@ def multiview_reconstruct(req: MultiViewReconstructRequest) -> MultiViewReconstr
         aruco_anchor=None,
         depth_stats={"min_m": 0.85, "p10_m": 0.90, "median_m": 1.02, "p90_m": 1.18, "max_m": 1.25},
     )
+
+
+@app.get("/api/quantum/demo", response_model=QuantumDemoResponse)
+def quantum_qubo_demo() -> QuantumDemoResponse:
+    return QuantumDemoResponse(**build_quantum_demo_suite())
+
+
+@app.post("/api/quantum/optimize", response_model=QuantumOptimizeResponse)
+def quantum_qubo_optimize(req: QuantumOptimizeRequest) -> QuantumOptimizeResponse:
+    params = req.model_dump(exclude_none=True)
+    if req.objects is not None:
+        params["objects"] = [o.model_dump(exclude_none=True) for o in req.objects]
+    try:
+        res = run_quantum_optimization_task(req.task, params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return QuantumOptimizeResponse(**res)
